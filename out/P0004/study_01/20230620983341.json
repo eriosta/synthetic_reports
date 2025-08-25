@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": null,
+    "prior_therapy": [],
+    "patient_id": "P0004",
+    "visit_number": 1,
+    "accession_number": "20230620983341",
+    "radiologist_style": "detailed"
+  },
+  "primary": {
+    "lobe": "LLL",
+    "size_mm": 30,
+    "features": [
+      "spiculation",
+      "cavitation",
+      "atelectasis",
+      "pleural_inv_suspected"
+    ]
+  },
+  "nodes": [],
+  "mets": [],
+  "tnm": {
+    "T": "T1c",
+    "N": "N0",
+    "M": "M0",
+    "stage_group": "I"
+  },
+  "rationale": [
+    "T1c because >20\u201330 mm",
+    "Separate tumor nodule(s) in same lobe \u2192 T3",
+    "No pathologically enlarged lymph nodes by size criteria",
+    "No definite distant metastases identified"
+  ],
+  "response_status": null
+}

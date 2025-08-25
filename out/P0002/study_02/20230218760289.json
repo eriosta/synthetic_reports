@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": "2023-08-28",
+    "prior_therapy": [
+      "chemotherapy",
+      "immunotherapy"
+    ],
+    "patient_id": "P0002",
+    "visit_number": 2,
+    "accession_number": "20230218760289",
+    "radiologist_style": "concise"
+  },
+  "primary": {
+    "lobe": "RLL",
+    "size_mm": 30,
+    "features": [
+      "spiculation",
+      "cavitation",
+      "pleural_inv_suspected"
+    ]
+  },
+  "nodes": [
+    {
+      "station": "2L",
+      "short_axis_mm": 11
+    },
+    {
+      "station": "10R",
+      "short_axis_mm": 8
+    },
+    {
+      "station": "10L",
+      "short_axis_mm": 10
+    }
+  ],
+  "mets": [],
+  "tnm": {
+    "T": "T1c",
+    "N": "N2",
+    "M": "M0",
+    "stage_group": "III"
+  },
+  "rationale": [],
+  "response_status": "SD"
+}

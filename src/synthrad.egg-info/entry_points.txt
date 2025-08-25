@@ -1,0 +1,2 @@
+[console_scripts]
+synthrad = synthrad.generator:main

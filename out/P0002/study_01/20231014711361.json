@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": null,
+    "prior_therapy": [],
+    "patient_id": "P0002",
+    "visit_number": 1,
+    "accession_number": "20231014711361",
+    "radiologist_style": "clinical"
+  },
+  "primary": {
+    "lobe": "RLL",
+    "size_mm": 28,
+    "features": [
+      "spiculation",
+      "cavitation",
+      "pleural_inv_suspected"
+    ]
+  },
+  "nodes": [
+    {
+      "station": "2L",
+      "short_axis_mm": 11
+    },
+    {
+      "station": "10R",
+      "short_axis_mm": 8
+    },
+    {
+      "station": "10L",
+      "short_axis_mm": 10
+    }
+  ],
+  "mets": [],
+  "tnm": {
+    "T": "T1c",
+    "N": "N2",
+    "M": "M0",
+    "stage_group": "III"
+  },
+  "rationale": [
+    "T1c because >20\u201330 mm",
+    "N2: station 2L short-axis \u226510 mm (11 mm)",
+    "N1: station 10L short-axis \u226510 mm (10 mm)",
+    "No definite distant metastases identified"
+  ],
+  "response_status": null
+}

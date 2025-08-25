@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": null,
+    "prior_therapy": [
+      "chemoradiation"
+    ],
+    "patient_id": "P0001",
+    "visit_number": 1,
+    "accession_number": "20210120999425",
+    "radiologist_style": "concise"
+  },
+  "primary": {
+    "lobe": "RLL",
+    "size_mm": 57,
+    "features": [
+      "spiculation",
+      "chest_wall_invasion"
+    ]
+  },
+  "nodes": [
+    {
+      "station": "2L",
+      "short_axis_mm": 13
+    },
+    {
+      "station": "7",
+      "short_axis_mm": 15
+    },
+    {
+      "station": "2L",
+      "short_axis_mm": 13
+    }
+  ],
+  "mets": [],
+  "tnm": {
+    "T": "T3",
+    "N": "N2",
+    "M": "M0",
+    "stage_group": "III"
+  },
+  "rationale": [
+    "T3 due to chest wall/diaphragm invasion",
+    "N2: station 2L short-axis \u226510 mm (13 mm)",
+    "N2: station 7 short-axis \u226510 mm (15 mm)",
+    "N2: station 2L short-axis \u226510 mm (13 mm)",
+    "No definite distant metastases identified"
+  ],
+  "response_status": null
+}

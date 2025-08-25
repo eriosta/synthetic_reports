@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": null,
+    "prior_therapy": [
+      "chemoradiation"
+    ],
+    "patient_id": "P0003",
+    "visit_number": 1,
+    "accession_number": "20250709328247",
+    "radiologist_style": "concise"
+  },
+  "primary": {
+    "lobe": "RML",
+    "size_mm": 42,
+    "features": [
+      "cavitation",
+      "atelectasis"
+    ]
+  },
+  "nodes": [],
+  "mets": [
+    {
+      "site": "pleura",
+      "size_mm": 28
+    },
+    {
+      "site": "pleura",
+      "size_mm": 28
+    }
+  ],
+  "tnm": {
+    "T": "T2a",
+    "N": "N0",
+    "M": "M1a",
+    "stage_group": "IV"
+  },
+  "rationale": [
+    "T2a because >30\u201350 mm",
+    "No pathologically enlarged lymph nodes by size criteria",
+    "M1a: pleural/contralateral lung disease"
+  ],
+  "response_status": null
+}

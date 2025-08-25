@@ -1,0 +1,19 @@
+FINDINGS:
+Some respiratory motion artifact.
+Lungs:
+  28 mm right lower lobe mass with pleural abutment with stranding, invasion not excluded central cavitary change.
+Lymph nodes:
+  Enlarged 2L lymph node measuring 11 mm in short-axis.
+  Enlarged 10R lymph node measuring 8 mm in short-axis.
+  Subcentimeter 10L node measuring 10 mm short-axis.
+Pleura/Pleural spaces: No pleural effusion. 
+Mediastinum: Mediastinum appears stable without concerning findings.
+Great vessels/Aorta: Aorta and great vessels appear stable.
+Upper abdomen (limited): No significant abdominal abnormality on limited evaluation.
+Bones/Osseous structures: Bones appear stable without concerning findings.
+Metastatic survey: No definite distant metastases identified.
+
+IMPRESSION:
+- Primary lung neoplasm in the right lower lobe measuring approximately 28 mm.
+- Nodal disease as detailed above.
+- No definite distant metastases identified.

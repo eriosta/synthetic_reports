@@ -1,0 +1,18 @@
+FINDINGS:
+Some respiratory motion artifact.
+Comparison: 2024-08-10.
+Lungs:
+  18 mm left lower lobe mass with central cavitary change adjacent volume loss.
+Lymph nodes:
+  No pathologically enlarged lymph nodes by size criteria.
+Pleura/Pleural spaces: No pleural effusion. 
+Mediastinum: Mediastinum appears stable without concerning findings.
+Great vessels/Aorta: Aorta and great vessels appear stable.
+Upper abdomen (limited): No significant abdominal abnormality on limited evaluation.
+Bones/Osseous structures: Bones appear stable without concerning findings.
+Metastatic survey: No definite distant metastases identified.
+
+IMPRESSION:
+- Primary lung neoplasm in the left lower lobe measuring approximately 18 mm.
+- No pathologically enlarged lymph nodes by size criteria.
+- No definite distant metastases identified.

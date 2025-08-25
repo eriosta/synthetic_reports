@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "modality": "CT chest with IV contrast",
+    "comparison_date": null,
+    "prior_therapy": [],
+    "patient_id": "P0000",
+    "visit_number": 1,
+    "accession_number": "20210113314878",
+    "radiologist_style": "detailed"
+  },
+  "primary": {
+    "lobe": "RLL",
+    "size_mm": 55,
+    "features": [
+      "spiculation"
+    ]
+  },
+  "nodes": [
+    {
+      "station": "4L",
+      "short_axis_mm": 17
+    },
+    {
+      "station": "4R",
+      "short_axis_mm": 10
+    },
+    {
+      "station": "2L",
+      "short_axis_mm": 12
+    }
+  ],
+  "mets": [],
+  "tnm": {
+    "T": "T2b",
+    "N": "N2",
+    "M": "M0",
+    "stage_group": "III"
+  },
+  "rationale": [
+    "T2b because >50\u201370 mm",
+    "N2: station 4L short-axis \u226510 mm (17 mm)",
+    "N2: station 4R short-axis \u226510 mm (10 mm)",
+    "N2: station 2L short-axis \u226510 mm (12 mm)",
+    "No definite distant metastases identified"
+  ],
+  "response_status": null
+}

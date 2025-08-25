@@ -1,0 +1,20 @@
+FINDINGS:
+Motion artifact present.
+Comparison: 2023-08-28.
+Lungs:
+  30 mm right lower lobe mass with central cavitary change internal cavitation.
+Lymph nodes:
+  Subcentimeter 2L node measuring 11 mm short-axis.
+  Enlarged 10R lymph node measuring 8 mm in short-axis.
+  Subcentimeter 10L node measuring 10 mm short-axis.
+Pleura/Pleural spaces: No pleural effusion. 
+Mediastinum: Mediastinum normal.
+Great vessels/Aorta: Great vessels normal.
+Upper abdomen (limited): Abdomen unremarkable.
+Bones/Osseous structures: Bones unremarkable.
+Metastatic survey: No definite distant metastases identified.
+
+IMPRESSION:
+- Primary lung neoplasm in the right lower lobe measuring approximately 30 mm.
+- Nodal disease as detailed above.
+- No definite distant metastases identified.
