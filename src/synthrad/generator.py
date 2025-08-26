@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .lexicons import LOBES, SIDE_FROM_LOBE, ARTIFACTS, NORMAL_BETS, PRIMARY_FEATURE_PHRASES, NODE_STATIONS, NODE_PHRASES, MET_SITES, MET_PHRASES, RADIOLOGIST_STYLES, pick
 from .schema import Case, Meta, Primary, Node, Met, TNM
+from .radlex_lexicons import get_radlex_lexicons
+from .radlex_config import get_config, PREDEFINED_CONFIGS
 
 # --- TNM logic for NSCLC (simplified, IASLC 8th-ish) ---
 
@@ -140,8 +142,14 @@ def sample_nodes(stage_hint: Optional[str], rng: random.Random) -> Tuple[List[No
     n_ct = 0
     if stage_hint in ("II","III"): n_ct = rng.randint(1, 3)
     if stage_hint == "IV": n_ct = rng.randint(0, 2)
+    
+    # Ensure unique stations
+    available_stations = list(NODE_STATIONS)  # Create a copy to avoid modifying the original
     for _ in range(n_ct):
-        st = rng.choice(NODE_STATIONS)
+        if not available_stations:  # If we run out of unique stations, stop
+            break
+        st = rng.choice(available_stations)
+        available_stations.remove(st)  # Remove to ensure uniqueness
         sz = rng.randint(8, 18)  # mix of subcm and enlarged
         nodes.append(Node(station=st, short_axis_mm=sz))
     ncat, nreasons = n_category(nodes)
@@ -153,9 +161,14 @@ def sample_mets(stage_hint: Optional[str], rng: random.Random) -> Tuple[List[Met
         return [], ["No definite distant metastases identified"]
     if stage_hint == "III" and rng.random() < 0.85:
         return [], ["No definite distant metastases identified"]
-    # otherwise add 1–2 mets
-    for _ in range(rng.randint(1, 2)):
-        site = rng.choice(MET_SITES)
+    # otherwise add 1–2 mets with unique sites
+    num_mets = rng.randint(1, 2)
+    available_sites = list(MET_SITES)  # Create a copy to avoid modifying the original
+    for _ in range(num_mets):
+        if not available_sites:  # If we run out of unique sites, stop
+            break
+        site = rng.choice(available_sites)
+        available_sites.remove(site)  # Remove to ensure uniqueness
         size = rng.randint(6, 28)
         mets.append(Met(site=site, size_mm=size))
     mcat, mreasons = m_category(mets)
@@ -194,20 +207,62 @@ def format_primary(p: Primary) -> str:
 
 def format_nodes(nodes: List[Node]) -> List[str]:
     lines = []
-    for nd in nodes:
-        templ = random.choice(NODE_PHRASES)
-        lines.append(templ.format(station=nd.station, size=nd.short_axis_mm))
-    if not lines:
+    if not nodes:
         lines = ["No pathologically enlarged lymph nodes by size criteria."]
+        return lines
+    
+    # Group nodes by station to avoid duplicate station descriptions
+    station_groups = {}
+    for nd in nodes:
+        if nd.station not in station_groups:
+            station_groups[nd.station] = []
+        station_groups[nd.station].append(nd)
+    
+    # Format each station group
+    for station, station_nodes in station_groups.items():
+        if len(station_nodes) == 1:
+            # Single node at this station
+            nd = station_nodes[0]
+            templ = random.choice(NODE_PHRASES)
+            lines.append(templ.format(station=nd.station, size=nd.short_axis_mm))
+        else:
+            # Multiple nodes at the same station (shouldn't happen with current logic, but handle gracefully)
+            sizes = [nd.short_axis_mm for nd in station_nodes]
+            size_str = ", ".join(f"{size} mm" for size in sizes)
+            lines.append(f"Multiple {station} lymph nodes measuring {size_str} in short-axis.")
+    
     return lines
 
 def format_mets(mets: List[Met]) -> List[str]:
     lines = []
-    for m in mets:
-        templs = MET_PHRASES.get(m.site, ["Indeterminate lesion {size} mm."])
-        lines.append(random.choice(templs).format(size=m.size_mm))
-    if not lines:
+    if not mets:
         lines = ["No definite distant metastases identified."]
+        return lines
+    
+    # Group metastases by site to avoid duplicate site descriptions
+    site_groups = {}
+    for m in mets:
+        if m.site not in site_groups:
+            site_groups[m.site] = []
+        site_groups[m.site].append(m)
+    
+    # Format each site group
+    for site, site_mets in site_groups.items():
+        if len(site_mets) == 1:
+            # Single metastasis at this site
+            m = site_mets[0]
+            templs = MET_PHRASES.get(m.site, ["Indeterminate lesion {size} mm."])
+            lines.append(random.choice(templs).format(size=m.size_mm))
+        else:
+            # Multiple metastases at the same site (shouldn't happen with current logic, but handle gracefully)
+            # Since templates expect {size}, we'll use the largest size and add a note
+            largest_size = max(m.size_mm for m in site_mets)
+            templs = MET_PHRASES.get(site, ["Indeterminate lesion {size} mm."])
+            base_line = random.choice(templs).format(size=largest_size)
+            if len(site_mets) > 1:
+                base_line += f" Additional {len(site_mets)-1} similar lesions at this site."
+            lines.append(base_line)
+    
     return lines
 
 def generate_accession_number(rng: random.Random) -> str:
@@ -219,7 +274,7 @@ def generate_accession_number(rng: random.Random) -> str:
     random_digits = rng.randint(100000, 999999)
     return f"{year}{month:02d}{day:02d}{random_digits}"
 
-def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe: Optional[str] = None, prior_therapy: Optional[List[str]] = None, patient_id: Optional[str] = None, visit_number: int = 1, radiologist_style: Optional[str] = None) -> Case:
+def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe: Optional[str] = None, prior_therapy: Optional[List[str]] = None, patient_id: Optional[str] = None, visit_number: int = 1, radiologist_style: Optional[str] = None, radlex_complexity: Optional[str] = None) -> Case:
     rng = random.Random(seed)
     stage_dist = stage_dist or {"I":0.25, "II":0.25, "III":0.30, "IV":0.20}
     hint = stage_hint_from_dist(stage_dist, rng)
@@ -241,7 +296,8 @@ def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe
         patient_id=patient_id,
         visit_number=visit_number,
         accession_number=accession_number,
-        radiologist_style=radiologist_style
+        radiologist_style=radiologist_style,
+        radlex_complexity=radlex_complexity
     )
     primary, t_reasons = sample_primary(lobe, hint, rng)
     nodes, n_reasons = sample_nodes(hint, rng)
@@ -279,7 +335,7 @@ def determine_response_status(baseline_case: Case, follow_up_case: Case) -> str:
     else:
         return "SD"  # Stable Disease
 
-def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90) -> Case:
+def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90, radlex_complexity: Optional[str] = None) -> Case:
     """Generate a follow-up case based on the baseline case"""
     rng = random.Random(seed)
     
@@ -303,7 +359,8 @@ def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90
         patient_id=baseline_case.meta.patient_id,
         visit_number=baseline_case.meta.visit_number + 1,
         accession_number=accession_number,
-        radiologist_style=radiologist_style
+        radiologist_style=radiologist_style,
+        radlex_complexity=radlex_complexity
     )
     
     # Determine response type
@@ -377,7 +434,7 @@ def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90
     
     return Case(meta=meta, primary=primary, nodes=nodes, mets=mets, tnm=tnm, rationale=[], response_status=response_status)
 
-def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date: datetime.datetime, comparison_date: str, response_dist: Dict[str,float] = None) -> Case:
+def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date: datetime.datetime, comparison_date: str, response_dist: Dict[str,float] = None, radlex_complexity: Optional[str] = None) -> Case:
     """Generate a follow-up case with specific study and comparison dates"""
     rng = random.Random(seed)
     
@@ -394,7 +451,8 @@ def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date
         patient_id=baseline_case.meta.patient_id,
         visit_number=baseline_case.meta.visit_number + 1,
         accession_number=accession_number,
-        radiologist_style=radiologist_style
+        radiologist_style=radiologist_style,
+        radlex_complexity=radlex_complexity
     )
     
     # Determine response type based on distribution
@@ -474,7 +532,7 @@ def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date
     
     return Case(meta=meta, primary=primary, nodes=nodes, mets=mets, tnm=tnm, rationale=[], response_status=response_status)
 
-def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,float], lobe: Optional[str] = None, max_studies: int = 5, response_dist: Dict[str,float] = None) -> tuple[List[Case], List[datetime.datetime]]:
+def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,float], lobe: Optional[str] = None, max_studies: int = 5, response_dist: Dict[str,float] = None, radlex_dist: Dict[str,float] = None) -> tuple[List[Case], List[datetime.datetime]]:
     """Generate a complete timeline of studies for a single patient"""
     rng = random.Random(seed)
     
@@ -483,12 +541,15 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
     total_studies = 1 + num_follow_ups  # baseline + follow-ups
     
     # Generate baseline case (no comparison date)
+    # Select RadLex config for baseline case
+    radlex_config = select_radlex_config(radlex_dist, rng) if radlex_dist else None
     baseline_case = generate_case(
         seed=rng.randint(0, 10_000_000),
         stage_dist=stage_dist,
         lobe=lobe,
         patient_id=patient_id,
-        visit_number=1
+        visit_number=1,
+        radlex_complexity=radlex_config
     )
     
     cases = [baseline_case]
@@ -509,12 +570,15 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
         study_dates.append(new_study_date)
         
         # Generate follow-up case with proper comparison date
+        # Select RadLex config for follow-up case
+        radlex_config = select_radlex_config(radlex_dist, rng) if radlex_dist else None
         follow_up_case = generate_follow_up_case_with_date(
             current_case,
             seed=rng.randint(0, 10_000_000),
             study_date=new_study_date,
             comparison_date=study_dates[-2].strftime("%Y-%m-%d"),  # Previous study date
-            response_dist=response_dist
+            response_dist=response_dist,
+            radlex_complexity=radlex_config
         )
         
         # Update visit number and patient ID
@@ -526,18 +590,40 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
     
     return cases, study_dates
 
-def generate_report(case: Case) -> str:
+def generate_report(case: Case, radlex_config: Optional[str] = None) -> str:
     lines = []
     lines.append("FINDINGS:")
+    
+    # Initialize RadLex lexicons if config provided
+    radlex_lexicons = None
+    if radlex_config and radlex_config in PREDEFINED_CONFIGS:
+        try:
+            config = PREDEFINED_CONFIGS[radlex_config]
+            radlex_lexicons = get_radlex_lexicons(
+                use_radlex=True,
+                rate_limit_per_second=config.rate_limit_per_second,
+                rate_limit_per_minute=config.rate_limit_per_minute
+            )
+        except Exception as e:
+            print(f"Warning: RadLex unavailable, using standard lexicons: {e}")
+            radlex_lexicons = None
     
     # Use radiologist-specific artifact phrases
     if case.meta.radiologist_style and case.meta.radiologist_style in RADIOLOGIST_STYLES:
         style = RADIOLOGIST_STYLES[case.meta.radiologist_style]
         if random.random() < 0.5:
-            lines.append(random.choice(style["artifact_phrases"]))
+            artifact_phrase = random.choice(style["artifact_phrases"])
+            # Enhance artifact phrase with RadLex if available
+            if radlex_lexicons:
+                artifact_phrase = radlex_lexicons.enhance_text_with_radlex(artifact_phrase)
+            lines.append(artifact_phrase)
     else:
         art = artifact_line(random.Random())
-        if art: lines.append(art)
+        if art:
+            # Enhance artifact line with RadLex if available
+            if radlex_lexicons:
+                art = radlex_lexicons.enhance_text_with_radlex(art)
+            lines.append(art)
     
     # Only add comparison line if there's a comparison date
     if case.meta.comparison_date:
@@ -545,12 +631,23 @@ def generate_report(case: Case) -> str:
     # Lungs
     lines.append("Lungs:")
     if case.primary:
-        lines.append("  " + format_primary(case.primary))
+        primary_text = format_primary(case.primary)
+        # Enhance primary tumor description with RadLex if available
+        if radlex_lexicons:
+            primary_text = radlex_lexicons.enhance_text_with_radlex(primary_text)
+        lines.append("  " + primary_text)
     else:
-        lines.append("  Clear lungs without focal mass or suspicious nodules.")
+        clear_lungs_text = "Clear lungs without focal mass or suspicious nodules."
+        # Enhance with RadLex if available
+        if radlex_lexicons:
+            clear_lungs_text = radlex_lexicons.enhance_text_with_radlex(clear_lungs_text)
+        lines.append("  " + clear_lungs_text)
     # Nodes
     lines.append("Lymph nodes:")
     for ln in format_nodes(case.nodes):
+        # Enhance lymph node description with RadLex if available
+        if radlex_lexicons:
+            ln = radlex_lexicons.enhance_text_with_radlex(ln)
         lines.append("  " + ln)
     # Pleura/pleural spaces
     lines.append("Pleura/Pleural spaces: No pleural effusion. ")
@@ -577,20 +674,40 @@ def generate_report(case: Case) -> str:
     lines.append("IMPRESSION:")
     if case.primary:
         side = SIDE_FROM_LOBE[case.primary.lobe].split()[0]
-        lines.append(f"- Primary lung neoplasm in the {SIDE_FROM_LOBE[case.primary.lobe]} lobe measuring approximately {case.primary.size_mm} mm.")
+        impression_text = f"- Primary lung neoplasm in the {SIDE_FROM_LOBE[case.primary.lobe]} lobe measuring approximately {case.primary.size_mm} mm."
+        # Enhance impression with RadLex if available
+        if radlex_lexicons:
+            impression_text = radlex_lexicons.enhance_text_with_radlex(impression_text)
+        lines.append(impression_text)
     if case.nodes:
-        lines.append("- Nodal disease as detailed above.")
+        nodal_text = "- Nodal disease as detailed above."
+        # Enhance with RadLex if available
+        if radlex_lexicons:
+            nodal_text = radlex_lexicons.enhance_text_with_radlex(nodal_text)
+        lines.append(nodal_text)
     else:
-        lines.append("- No pathologically enlarged lymph nodes by size criteria.")
+        no_nodes_text = "- No pathologically enlarged lymph nodes by size criteria."
+        # Enhance with RadLex if available
+        if radlex_lexicons:
+            no_nodes_text = radlex_lexicons.enhance_text_with_radlex(no_nodes_text)
+        lines.append(no_nodes_text)
     if case.mets:
-        lines.append("- Findings suspicious for distant metastatic disease as above.")
+        mets_text = "- Findings suspicious for distant metastatic disease as above."
+        # Enhance with RadLex if available
+        if radlex_lexicons:
+            mets_text = radlex_lexicons.enhance_text_with_radlex(mets_text)
+        lines.append(mets_text)
     else:
-        lines.append("- No definite distant metastases identified.")
+        no_mets_text = "- No definite distant metastases identified."
+        # Enhance with RadLex if available
+        if radlex_lexicons:
+            no_mets_text = radlex_lexicons.enhance_text_with_radlex(no_mets_text)
+        lines.append(no_mets_text)
     # TNM and Response Status lines removed for cleaner reports
     
     return "\n".join(lines)
 
-def write_case(case: Case, outdir: str, stem: str):
+def write_case(case: Case, outdir: str, stem: str, radlex_config: Optional[str] = None):
     # Create hierarchical folder structure: patient_id/study_visit_number/
     if case.meta.patient_id:
         patient_dir = os.path.join(outdir, case.meta.patient_id)
@@ -608,7 +725,7 @@ def write_case(case: Case, outdir: str, stem: str):
         study_dir = outdir
         filename = stem
     
-    report = generate_report(case)
+    report = generate_report(case, radlex_config)
     
     # Write both TXT and JSON files
     txt_path = os.path.join(study_dir, f"{filename}.txt")
@@ -646,6 +763,43 @@ def parse_response_dist(arg: str) -> Dict[str,float]:
     for k in out:
         out[k] /= s
     return out
+
+def parse_radlex_dist(arg: str) -> Dict[str,float]:
+    # minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1
+    parts = [p for p in arg.split(',') if p]
+    out = {}
+    for p in parts:
+        k,v = p.split(':')
+        config_name = k.strip()
+        if config_name not in PREDEFINED_CONFIGS:
+            raise ValueError(f"Unknown RadLex config: {config_name}. Available: {list(PREDEFINED_CONFIGS.keys())}")
+        out[config_name] = float(v)
+    s = sum(out.values())
+    if s <= 0: raise ValueError("RadLex distribution must sum > 0")
+    # normalize
+    for k in out:
+        out[k] /= s
+    return out
+
+def select_radlex_config(radlex_dist: Dict[str, float], rng: random.Random) -> Optional[str]:
+    """Select a RadLex configuration based on the distribution."""
+    if not radlex_dist:
+        return None
+    
+    # Convert to cumulative distribution
+    configs = list(radlex_dist.keys())
+    probs = list(radlex_dist.values())
+    
+    # Select based on probability
+    rand_val = rng.random()
+    cumulative = 0
+    for config, prob in zip(configs, probs):
+        cumulative += prob
+        if rand_val <= cumulative:
+            return config
+    
+    # Fallback to last config
+    return configs[-1] if configs else None
 
 def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime] = None) -> List[dict]:
     """Convert generated cases to JSONL format for the React app"""
@@ -788,6 +942,7 @@ def main():
     ap.add_argument("--follow-up-days", type=int, default=90, help="Days between baseline and follow-up (default: 90)")
     ap.add_argument("--studies-per-patient", type=int, default=5, help="Maximum number of studies per patient (2-10, default: 5). Each patient will have 1 baseline + 1-{max} follow-up studies")
     ap.add_argument("--response-dist", type=str, default="CR:0.1,PR:0.3,SD:0.4,PD:0.2", help="Response distribution e.g. CR:0.1,PR:0.3,SD:0.4,PD:0.2 (will be normalized)")
+    ap.add_argument("--radlex-dist", type=str, default="standard:1.0", help="RadLex configuration distribution e.g. minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1 (will be normalized)")
     ap.add_argument("--legacy-mode", action="store_true", help="Use legacy flat file structure")
     ap.add_argument("--jsonl", type=str, default=None, help="Output JSONL file for React app (e.g., cohort_labels.jsonl)")
     args = ap.parse_args()
@@ -800,6 +955,7 @@ def main():
     rng = random.Random(args.seed)
     dist = parse_stage_dist(args.stage_dist)
     response_dist = parse_response_dist(args.response_dist)
+    radlex_dist = parse_radlex_dist(args.radlex_dist)
     
     # Collect all cases for JSONL output if requested
     all_cases = []
@@ -810,22 +966,27 @@ def main():
         
         if args.legacy_mode:
             # Legacy mode: generate baseline and optional follow-up
+            # Select RadLex config for this case
+            radlex_config = select_radlex_config(radlex_dist, rng)
+            
             baseline_case = generate_case(
                 seed=rng.randint(0,10_000_000), 
                 stage_dist=dist, 
                 lobe=args.lobe,
                 patient_id=patient_id,
-                visit_number=1
+                visit_number=1,
+                radlex_complexity=radlex_config
             )
-            write_case(baseline_case, args.out, f"{patient_id}_baseline")
+            write_case(baseline_case, args.out, f"{patient_id}_baseline", radlex_config)
             
             if args.follow_up:
                 follow_up_case = generate_follow_up_case(
                     baseline_case, 
                     seed=rng.randint(0,10_000_000),
-                    days_later=args.follow_up_days
+                    days_later=args.follow_up_days,
+                    radlex_complexity=radlex_config
                 )
-                write_case(follow_up_case, args.out, f"{patient_id}_followup")
+                write_case(follow_up_case, args.out, f"{patient_id}_followup", radlex_config)
         else:
             # New mode: generate complete patient timeline
             cases, study_dates = generate_patient_timeline(
@@ -834,12 +995,13 @@ def main():
                 stage_dist=dist,
                 lobe=args.lobe,
                 max_studies=args.studies_per_patient,
-                response_dist=response_dist
+                response_dist=response_dist,
+                radlex_dist=radlex_dist
             )
             
-            # Write all cases for this patient
+            # Write all cases for this patient (RadLex config already selected per case)
             for case in cases:
-                write_case(case, args.out, case.meta.accession_number)
+                write_case(case, args.out, case.meta.accession_number, case.meta.radlex_complexity)
             
             # Collect for JSONL output
             all_cases.extend(cases)

@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: synrad-lung
-Version: 0.1.0
-Summary: Synthetic lung cancer staging CT reports with TNM-aware controls
-Author-email: StoryMode Oncology <dev@example.com>
-Requires-Python: >=3.9
-Requires-Dist: pydantic>=2.5

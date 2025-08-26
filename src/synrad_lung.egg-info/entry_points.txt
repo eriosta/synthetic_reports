@@ -1,2 +1,0 @@
-[console_scripts]
-synrad-lung = synrad_lung.generator:main

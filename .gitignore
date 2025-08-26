@@ -1,0 +1,83 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test outputs
+test_output/
+test_*/
+demo_output/
+radlex_demo_output/
+radlex_followup_demo/
+radlex_jsonl_demo/
+simple_test/
+test_fix/
+test_rate_limited/
+no_radlex_test/
+mixed_reports/
+conservative_reports/
+aggressive_reports/
+balanced_reports/
+followup_reports/
+jsonl_reports/
+complete_pipeline/
+legacy_reports/
+basic_reports/
+advanced_staging/
+optimistic_reports/
+enhanced_reports/
+
+# RadLex cache
+radlex_cache/
+*.json
+
+# Generated reports
+out/
+reports/
+*.txt
+*.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+

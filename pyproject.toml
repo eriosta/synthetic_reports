@@ -7,7 +7,7 @@ name = "synthrad"
 version = "0.1.0"
 description = "Synthetic lung cancer staging CT reports with TNM-aware controls and RECIST tracking"
 authors = [{name="StoryMode Oncology", email="dev@example.com"}]
-dependencies = ["pydantic>=2.5"]
+dependencies = ["pydantic>=2.5", "requests>=2.25.0"]
 requires-python = ">=3.9"
 
 [project.scripts]

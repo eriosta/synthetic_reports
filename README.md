@@ -1,6 +1,25 @@
-# synrad-lung
+# SynthRad: Synthetic Radiology Report Generator
 
 Synthetic *oncology-grade* CT chest radiology reports for **lung cancer**, designed to feed your TNM extraction pipeline.
+
+## Project Structure
+
+```
+synthetic_reports/
+├── configs/          # Configuration files (samples, research, custom)
+├── tools/            # Utility tools (builders, generators, utils)
+├── docs/             # Documentation (guides, api, examples)
+├── examples/         # Example scripts and demos
+├── src/              # Source code
+└── tests/            # Test files
+```
+
+📁 **configs/** - Organized configuration files  
+🔧 **tools/** - Utility tools and scripts  
+📚 **docs/** - Comprehensive documentation  
+💡 **examples/** - Working examples and demos  
+
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed organization.
 
 - Realistic structure: `FINDINGS` and `IMPRESSION` sections, common artifacts, comparisons, and normal-by-exception phrasing.
 - TNM-aware controls: pick T/N/M distributions, lobar location, histology hints, post-treatment changes, etc.
@@ -12,26 +31,159 @@ Synthetic *oncology-grade* CT chest radiology reports for **lung cancer**, desig
 
 ## Quick start
 
+### Interactive Configuration Builder
+
+Create custom configurations interactively:
+
 ```bash
-# Generate baseline cases only
-pip install -e .
-python -m synthrad --n 5 --stage-dist I:0.2,II:0.25,III:0.35,IV:0.2 --seed 7 --out ./out
-
-# Generate baseline cases with follow-up reports (includes response status)
-python -m synthrad --n 5 --follow-up --stage-dist I:0.2,II:0.25,III:0.35,IV:0.2 --seed 7 --out ./out
-
-# Generate follow-up cases with custom interval (e.g., 60 days)
-python -m synthrad --n 5 --follow-up --follow-up-days 60 --stage-dist I:0.2,II:0.25,III:0.35,IV:0.2 --seed 7 --out ./out
-
-# Generate with variable follow-up studies (1-4 studies per patient)
-python -m synthrad --n 5 --studies-per-patient 4 --response-dist CR:0.05,PR:0.2,SD:0.3,PD:0.45 --seed 7 --out ./out
-
-# Generate with optimistic response distribution (more responses)
-python -m synthrad --n 5 --studies-per-patient 4 --response-dist CR:0.2,PR:0.4,SD:0.3,PD:0.1 --seed 7 --out ./out
-
-# Generate with JSONL output for React app
-python -m synthrad --n 5 --studies-per-patient 4 --seed 42 --out ./out --jsonl cohort_labels.jsonl
+python tools/builders/config_builder.py
 ```
+
+This provides a guided interface to create:
+- Single configurations
+- Configuration sets
+- Sample configurations
+- Research configurations
+
+### Key Configuration Types
+
+The system includes 3 main configuration types that showcase all major features:
+
+**1. Baseline Generation** - Single CT scans with TNM staging
+```bash
+# Generate 10 baseline cases with balanced stage distribution
+python tools/generators/generate.py --configs configs/samples/config.json --names baseline_standard
+```
+
+**2. Follow-up Tracking** - Multiple studies per patient with response assessment
+```bash
+# Generate baseline + follow-up studies with response tracking (CR/PR/SD/PD)
+python tools/generators/generate.py --configs configs/samples/config.json --names followup_standard
+```
+
+**3. RadLex Enhancement** - Medical terminology enhancement with different intensity levels
+```bash
+# Generate reports with enhanced medical terminology
+python tools/generators/generate.py --configs configs/samples/config.json --names radlex_standard
+```
+
+### Key Features
+
+✅ **Type Safety** - Validated configuration objects with clear error messages  
+✅ **Multiple Formats** - Support for JSON and YAML configuration files  
+✅ **Tagging System** - Organize configurations with tags for easy filtering  
+✅ **Interactive Builder** - Guided creation of configurations  
+✅ **Validation** - Automatic validation of all parameters and distributions  
+✅ **Flexible Filtering** - Run specific configurations by name or tags  
+✅ **Parallel Execution** - Run multiple configurations simultaneously  
+✅ **Clean Output** - Each configuration gets its own organized output directory  
+
+### Essential Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `num_patients` | Number of patients to generate | `10` |
+| `stage_distribution` | Cancer stage distribution | `"I:0.3,II:0.3,III:0.3,IV:0.1"` |
+| `follow_up` | Generate follow-up studies | `true` |
+| `radlex_distribution` | Medical terminology level | `"standard:1.0"` |
+
+## All Available Arguments
+
+Here's a comprehensive list of all command-line arguments you can customize:
+
+### Core Arguments
+- `--n <number>`: Number of patients to generate (default: 5)
+- `--out <directory>`: Output directory (default: "./out")
+- `--seed <number>`: Random seed for deterministic generation (default: 0)
+- `--legacy-mode`: Use legacy flat file structure instead of organized directories
+
+### Tumor and Staging Control
+- `--lobe <lobe>`: Force primary lobe location (choices: RUL, RML, RLL, LUL, LLL)
+- `--stage-dist <distribution>`: Stage distribution (default: "I:0.25,II:0.25,III:0.30,IV:0.20")
+  - Example: `--stage-dist "I:0.2,II:0.25,III:0.35,IV:0.2"`
+
+### Follow-up and Response Tracking
+- `--follow-up`: Generate follow-up cases for each baseline case
+- `--follow-up-days <days>`: Days between baseline and follow-up (default: 90)
+- `--studies-per-patient <number>`: Maximum studies per patient, 2-10 (default: 5)
+  - Each patient gets 1 baseline + 1-{max} follow-up studies
+- `--response-dist <distribution>`: Response distribution (default: "CR:0.1,PR:0.3,SD:0.4,PD:0.2")
+  - Example: `--response-dist "CR:0.2,PR:0.4,SD:0.3,PD:0.1"`
+
+### RadLex Enhancement
+- `--radlex-dist <distribution>`: RadLex configuration distribution (default: "standard:1.0")
+  - Available configs: minimal, standard, aggressive, conservative
+  - Example: `--radlex-dist "minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1"`
+
+### Output Formats
+- `--jsonl <filename>`: Output JSONL file for React app (e.g., "cohort_labels.jsonl")
+
+### Distribution Format Examples
+
+**Stage Distribution:**
+```bash
+# Balanced distribution
+--stage-dist "I:0.25,II:0.25,III:0.30,IV:0.20"
+
+# Early-stage focused
+--stage-dist "I:0.4,II:0.3,III:0.2,IV:0.1"
+
+# Advanced-stage focused
+--stage-dist "I:0.1,II:0.2,III:0.4,IV:0.3"
+```
+
+**Response Distribution:**
+```bash
+# Standard distribution
+--response-dist "CR:0.1,PR:0.3,SD:0.4,PD:0.2"
+
+# Optimistic (more responses)
+--response-dist "CR:0.2,PR:0.4,SD:0.3,PD:0.1"
+
+# Conservative (more stable disease)
+--response-dist "CR:0.05,PR:0.2,SD:0.5,PD:0.25"
+```
+
+**RadLex Distribution:**
+```bash
+# All standard enhancement
+--radlex-dist "standard:1.0"
+
+# Mixed enhancement levels
+--radlex-dist "minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1"
+
+# Conservative enhancement only
+--radlex-dist "conservative:1.0"
+
+# No RadLex enhancement
+--radlex-dist "minimal:1.0"
+```
+
+### Complete Example Commands
+
+```bash
+# Basic generation
+python -m synthrad --n 10 --seed 42 --out ./basic_reports
+
+# Advanced staging with specific lobe
+python -m synthrad --n 5 --lobe RUL --stage-dist "I:0.1,II:0.2,III:0.4,IV:0.3" --out ./advanced_staging
+
+# Follow-up with custom intervals
+python -m synthrad --n 3 --follow-up --follow-up-days 60 --studies-per-patient 4 --out ./followup_reports
+
+# Optimistic response tracking
+python -m synthrad --n 5 --follow-up --response-dist "CR:0.2,PR:0.4,SD:0.3,PD:0.1" --out ./optimistic_reports
+
+# RadLex enhanced with mixed configurations
+python -m synthrad --n 10 --radlex-dist "minimal:0.3,standard:0.4,aggressive:0.3" --out ./enhanced_reports
+
+# Complete pipeline with JSONL export
+python -m synthrad --n 5 --follow-up --studies-per-patient 3 --jsonl cohort.jsonl --out ./complete_pipeline
+
+# Legacy mode with flat file structure
+python -m synthrad --n 3 --legacy-mode --out ./legacy_reports
+```
+
 
 This writes `*.txt` and matching `*.json` sidecars under `./out`.
 
@@ -113,10 +265,33 @@ The `--jsonl` option generates a JSONL (JSON Lines) file compatible with RECIST 
 - `overall_response`: CR, PR, SD, or PD
 - `lesions`: Array of individual lesions with size measurements
 
+## RadLex Integration
+
+This project includes optional RadLex ontology integration for enhanced medical terminology. RadLex provides standardized radiological terms that can make your synthetic reports more realistic.
+
+### Quick RadLex Setup
+
+1. Get a free API key from [BioPortal](https://bioportal.bioontology.org/)
+2. Set environment variable: `export BIOPORTAL_API_KEY="your_key"`
+3. Run the example: `python scripts/radlex_example.py`
+
+### RadLex Features
+
+- **Enhanced Terminology**: Replace basic terms with standardized RadLex concepts
+- **Text Enhancement**: Automatically enhance generated reports with RadLex terms
+- **Caching**: Built-in caching to reduce API calls
+- **Configurable**: Multiple enhancement levels (minimal, standard, aggressive, conservative)
+- **Distribution Control**: Specify proportions of different RadLex configurations per case
+- **Pipeline Integration**: Works with all generator features (follow-up, JSONL, etc.)
+
+See [RADLEX_INTEGRATION.md](RADLEX_INTEGRATION.md) for detailed documentation.
+
 ## Notes
 
 - All content is synthetic and non-PHI.
 - Intended to exercise **TNM staging extraction**, not to generate perfect prose.
 - You can tune verbosity and normal-by-exception ratios via flags.
 - Response tracking follows simplified RECIST criteria for realistic oncology workflows.
+- RadLex integration is optional and requires a BioPortal API key.
+- Test outputs and cache files are automatically excluded via `.gitignore`.
 
