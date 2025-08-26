@@ -5,8 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .lexicons import LOBES, SIDE_FROM_LOBE, ARTIFACTS, NORMAL_BETS, PRIMARY_FEATURE_PHRASES, NODE_STATIONS, NODE_PHRASES, MET_SITES, MET_PHRASES, RADIOLOGIST_STYLES, pick
 from .schema import Case, Meta, Primary, Node, Met, TNM
-from .radlex_lexicons import get_radlex_lexicons
-from .radlex_config import get_config, PREDEFINED_CONFIGS
+from .radlex_config import get_config
 
 # --- TNM logic for NSCLC (simplified, IASLC 8th-ish) ---
 
@@ -274,7 +273,7 @@ def generate_accession_number(rng: random.Random) -> str:
     random_digits = rng.randint(100000, 999999)
     return f"{year}{month:02d}{day:02d}{random_digits}"
 
-def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe: Optional[str] = None, prior_therapy: Optional[List[str]] = None, patient_id: Optional[str] = None, visit_number: int = 1, radiologist_style: Optional[str] = None, radlex_complexity: Optional[str] = None) -> Case:
+def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe: Optional[str] = None, prior_therapy: Optional[List[str]] = None, patient_id: Optional[str] = None, visit_number: int = 1, radiologist_style: Optional[str] = None) -> Case:
     rng = random.Random(seed)
     stage_dist = stage_dist or {"I":0.25, "II":0.25, "III":0.30, "IV":0.20}
     hint = stage_hint_from_dist(stage_dist, rng)
@@ -296,8 +295,7 @@ def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe
         patient_id=patient_id,
         visit_number=visit_number,
         accession_number=accession_number,
-        radiologist_style=radiologist_style,
-        radlex_complexity=radlex_complexity
+        radiologist_style=radiologist_style
     )
     primary, t_reasons = sample_primary(lobe, hint, rng)
     nodes, n_reasons = sample_nodes(hint, rng)
@@ -335,7 +333,7 @@ def determine_response_status(baseline_case: Case, follow_up_case: Case) -> str:
     else:
         return "SD"  # Stable Disease
 
-def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90, radlex_complexity: Optional[str] = None) -> Case:
+def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90) -> Case:
     """Generate a follow-up case based on the baseline case"""
     rng = random.Random(seed)
     
@@ -434,7 +432,7 @@ def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90
     
     return Case(meta=meta, primary=primary, nodes=nodes, mets=mets, tnm=tnm, rationale=[], response_status=response_status)
 
-def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date: datetime.datetime, comparison_date: str, response_dist: Dict[str,float] = None, radlex_complexity: Optional[str] = None) -> Case:
+def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date: datetime.datetime, comparison_date: str, response_dist: Dict[str,float] = None) -> Case:
     """Generate a follow-up case with specific study and comparison dates"""
     rng = random.Random(seed)
     
@@ -451,8 +449,7 @@ def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date
         patient_id=baseline_case.meta.patient_id,
         visit_number=baseline_case.meta.visit_number + 1,
         accession_number=accession_number,
-        radiologist_style=radiologist_style,
-        radlex_complexity=radlex_complexity
+        radiologist_style=radiologist_style
     )
     
     # Determine response type based on distribution
@@ -532,7 +529,7 @@ def generate_follow_up_case_with_date(baseline_case: Case, seed: int, study_date
     
     return Case(meta=meta, primary=primary, nodes=nodes, mets=mets, tnm=tnm, rationale=[], response_status=response_status)
 
-def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,float], lobe: Optional[str] = None, max_studies: int = 5, response_dist: Dict[str,float] = None, radlex_dist: Dict[str,float] = None) -> tuple[List[Case], List[datetime.datetime]]:
+def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,float], lobe: Optional[str] = None, max_studies: int = 5, response_dist: Dict[str,float] = None) -> tuple[List[Case], List[datetime.datetime]]:
     """Generate a complete timeline of studies for a single patient"""
     rng = random.Random(seed)
     
@@ -541,15 +538,12 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
     total_studies = 1 + num_follow_ups  # baseline + follow-ups
     
     # Generate baseline case (no comparison date)
-    # Select RadLex config for baseline case
-    radlex_config = select_radlex_config(radlex_dist, rng) if radlex_dist else None
     baseline_case = generate_case(
         seed=rng.randint(0, 10_000_000),
         stage_dist=stage_dist,
         lobe=lobe,
         patient_id=patient_id,
-        visit_number=1,
-        radlex_complexity=radlex_config
+        visit_number=1
     )
     
     cases = [baseline_case]
@@ -570,15 +564,12 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
         study_dates.append(new_study_date)
         
         # Generate follow-up case with proper comparison date
-        # Select RadLex config for follow-up case
-        radlex_config = select_radlex_config(radlex_dist, rng) if radlex_dist else None
         follow_up_case = generate_follow_up_case_with_date(
             current_case,
             seed=rng.randint(0, 10_000_000),
             study_date=new_study_date,
             comparison_date=study_dates[-2].strftime("%Y-%m-%d"),  # Previous study date
-            response_dist=response_dist,
-            radlex_complexity=radlex_config
+            response_dist=response_dist
         )
         
         # Update visit number and patient ID
@@ -590,39 +581,21 @@ def generate_patient_timeline(patient_id: str, seed: int, stage_dist: Dict[str,f
     
     return cases, study_dates
 
-def generate_report(case: Case, radlex_config: Optional[str] = None) -> str:
+def generate_report(case: Case) -> str:
     lines = []
     lines.append("FINDINGS:")
     
-    # Initialize RadLex lexicons if config provided
-    radlex_lexicons = None
-    if radlex_config and radlex_config in PREDEFINED_CONFIGS:
-        try:
-            config = PREDEFINED_CONFIGS[radlex_config]
-            radlex_lexicons = get_radlex_lexicons(
-                use_radlex=True,
-                rate_limit_per_second=config.rate_limit_per_second,
-                rate_limit_per_minute=config.rate_limit_per_minute
-            )
-        except Exception as e:
-            print(f"Warning: RadLex unavailable, using standard lexicons: {e}")
-            radlex_lexicons = None
+
     
     # Use radiologist-specific artifact phrases
     if case.meta.radiologist_style and case.meta.radiologist_style in RADIOLOGIST_STYLES:
         style = RADIOLOGIST_STYLES[case.meta.radiologist_style]
         if random.random() < 0.5:
             artifact_phrase = random.choice(style["artifact_phrases"])
-            # Enhance artifact phrase with RadLex if available
-            if radlex_lexicons:
-                artifact_phrase = radlex_lexicons.enhance_text_with_radlex(artifact_phrase)
             lines.append(artifact_phrase)
     else:
         art = artifact_line(random.Random())
         if art:
-            # Enhance artifact line with RadLex if available
-            if radlex_lexicons:
-                art = radlex_lexicons.enhance_text_with_radlex(art)
             lines.append(art)
     
     # Only add comparison line if there's a comparison date
@@ -632,22 +605,13 @@ def generate_report(case: Case, radlex_config: Optional[str] = None) -> str:
     lines.append("Lungs:")
     if case.primary:
         primary_text = format_primary(case.primary)
-        # Enhance primary tumor description with RadLex if available
-        if radlex_lexicons:
-            primary_text = radlex_lexicons.enhance_text_with_radlex(primary_text)
         lines.append("  " + primary_text)
     else:
         clear_lungs_text = "Clear lungs without focal mass or suspicious nodules."
-        # Enhance with RadLex if available
-        if radlex_lexicons:
-            clear_lungs_text = radlex_lexicons.enhance_text_with_radlex(clear_lungs_text)
         lines.append("  " + clear_lungs_text)
     # Nodes
     lines.append("Lymph nodes:")
     for ln in format_nodes(case.nodes):
-        # Enhance lymph node description with RadLex if available
-        if radlex_lexicons:
-            ln = radlex_lexicons.enhance_text_with_radlex(ln)
         lines.append("  " + ln)
     # Pleura/pleural spaces
     lines.append("Pleura/Pleural spaces: No pleural effusion. ")
@@ -675,39 +639,24 @@ def generate_report(case: Case, radlex_config: Optional[str] = None) -> str:
     if case.primary:
         side = SIDE_FROM_LOBE[case.primary.lobe].split()[0]
         impression_text = f"- Primary lung neoplasm in the {SIDE_FROM_LOBE[case.primary.lobe]} lobe measuring approximately {case.primary.size_mm} mm."
-        # Enhance impression with RadLex if available
-        if radlex_lexicons:
-            impression_text = radlex_lexicons.enhance_text_with_radlex(impression_text)
         lines.append(impression_text)
     if case.nodes:
         nodal_text = "- Nodal disease as detailed above."
-        # Enhance with RadLex if available
-        if radlex_lexicons:
-            nodal_text = radlex_lexicons.enhance_text_with_radlex(nodal_text)
         lines.append(nodal_text)
     else:
         no_nodes_text = "- No pathologically enlarged lymph nodes by size criteria."
-        # Enhance with RadLex if available
-        if radlex_lexicons:
-            no_nodes_text = radlex_lexicons.enhance_text_with_radlex(no_nodes_text)
         lines.append(no_nodes_text)
     if case.mets:
         mets_text = "- Findings suspicious for distant metastatic disease as above."
-        # Enhance with RadLex if available
-        if radlex_lexicons:
-            mets_text = radlex_lexicons.enhance_text_with_radlex(mets_text)
         lines.append(mets_text)
     else:
         no_mets_text = "- No definite distant metastases identified."
-        # Enhance with RadLex if available
-        if radlex_lexicons:
-            no_mets_text = radlex_lexicons.enhance_text_with_radlex(no_mets_text)
         lines.append(no_mets_text)
     # TNM and Response Status lines removed for cleaner reports
     
     return "\n".join(lines)
 
-def write_case(case: Case, outdir: str, stem: str, radlex_config: Optional[str] = None):
+def write_case(case: Case, outdir: str, stem: str, use_radlex: bool = True):
     # Create hierarchical folder structure: patient_id/study_visit_number/
     if case.meta.patient_id:
         patient_dir = os.path.join(outdir, case.meta.patient_id)
@@ -725,16 +674,172 @@ def write_case(case: Case, outdir: str, stem: str, radlex_config: Optional[str] 
         study_dir = outdir
         filename = stem
     
-    report = generate_report(case, radlex_config)
+    report = generate_report(case)
     
-    # Write both TXT and JSON files
+    # Write TXT file
     txt_path = os.path.join(study_dir, f"{filename}.txt")
-    json_path = os.path.join(study_dir, f"{filename}.json")
-    
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(report)
+    
+    # Create combined JSON structure
+    combined_data = {
+        "meta": case.meta.model_dump(),
+        "clinical_data": {
+            "primary": case.primary.model_dump() if case.primary else None,
+            "nodes": [node.model_dump() for node in case.nodes],
+            "mets": [met.model_dump() for met in case.mets],
+            "tnm": case.tnm.model_dump(),
+            "rationale": case.rationale,
+            "response_status": case.response_status
+        }
+    }
+    
+    # Add anatomic mapping if RadLex is enabled
+    if use_radlex:
+        try:
+            import datetime
+            
+            # Generate study date
+            study_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            
+            # Create basic anatomic mapping without external RadLex service
+            anatomic_mapping = {
+                "patient_id": case.meta.patient_id or "unknown",
+                "study_date": study_date,
+                "body_regions": {
+                    "thorax": {
+                        "lungs": {
+                            "right_lung": {"findings": [], "subregions": {}},
+                            "left_lung": {"findings": [], "subregions": {}}
+                        },
+                        "mediastinum": {
+                            "lymph_nodes": {"findings": [], "subregions": {}}
+                        },
+                        "pleura": {"findings": [], "subregions": {}}
+                    }
+                },
+                "lesions": [],
+                "lymph_nodes": [],
+                "metastases": [],
+                "artifacts": []
+            }
+            
+            # Map primary tumor
+            if case.primary:
+                # Determine lung side
+                if case.primary.lobe in ["RUL", "RML", "RLL"]:
+                    lung_side = "right_lung"
+                    laterality = "right"
+                else:
+                    lung_side = "left_lung"
+                    laterality = "left"
+                
+                # Add to body regions
+                anatomic_mapping["body_regions"]["thorax"]["lungs"][lung_side]["findings"].append({
+                    "type": "primary_tumor",
+                    "location": case.primary.lobe,
+                    "size_mm": case.primary.size_mm,
+                    "radlex_id": None
+                })
+                
+                # Add to lesions list
+                anatomic_mapping["lesions"].append({
+                    "finding_type": "primary_tumor",
+                    "anatomic_location": {
+                        "name": case.primary.lobe,
+                        "radlex_id": None,
+                        "radlex_label": "lung mass",
+                        "parent_location": lung_side,
+                        "level": "lobe",
+                        "laterality": laterality,
+                        "position": None
+                    },
+                    "size_mm": case.primary.size_mm,
+                    "features": case.primary.features,
+                    "radlex_id": None,
+                    "radlex_label": "lung mass",
+                    "confidence": 1.0,
+                    "target_lesion": True
+                })
+            
+            # Map lymph nodes
+            for node in case.nodes:
+                # Add to body regions
+                anatomic_mapping["body_regions"]["thorax"]["mediastinum"]["lymph_nodes"]["findings"].append({
+                    "type": "lymph_node",
+                    "station": node.station,
+                    "size_mm": node.short_axis_mm,
+                    "radlex_id": None
+                })
+                
+                # Add to lymph nodes list
+                anatomic_mapping["lymph_nodes"].append({
+                    "finding_type": "lymph_node",
+                    "anatomic_location": {
+                        "name": node.station,
+                        "radlex_id": None,
+                        "radlex_label": "mediastinal lymph node",
+                        "parent_location": "mediastinal_lymph_nodes",
+                        "level": "station",
+                        "laterality": "right" if node.station.endswith("R") else "left" if node.station.endswith("L") else "central",
+                        "position": None
+                    },
+                    "size_mm": node.short_axis_mm,
+                    "features": [],
+                    "radlex_id": None,
+                    "radlex_label": "mediastinal lymph node",
+                    "confidence": 1.0,
+                    "target_lesion": node.short_axis_mm >= 10
+                })
+            
+            # Map metastases
+            for met in case.mets:
+                anatomic_mapping["metastases"].append({
+                    "finding_type": "metastasis",
+                    "anatomic_location": {
+                        "name": met.site,
+                        "radlex_id": None,
+                        "radlex_label": "metastasis",
+                        "parent_location": "extrathoracic",
+                        "level": "organ",
+                        "laterality": None,
+                        "position": None
+                    },
+                    "size_mm": met.size_mm,
+                    "features": [],
+                    "radlex_id": None,
+                    "radlex_label": "metastasis",
+                    "confidence": 1.0,
+                    "target_lesion": met.size_mm >= 10
+                })
+            
+            # Add anatomic mapping to combined data
+            combined_data["anatomic_mapping"] = anatomic_mapping
+            
+        except Exception as e:
+            print(f"Warning: Failed to create anatomic map for {case.meta.accession_number}: {e}")
+            # Add empty anatomic mapping structure if failed
+            combined_data["anatomic_mapping"] = {
+                "body_regions": {},
+                "lesions": [],
+                "lymph_nodes": [],
+                "metastases": [],
+                "artifacts": []
+            }
+    else:
+        # Add empty anatomic mapping structure when RadLex is disabled
+        combined_data["anatomic_mapping"] = {
+            "body_regions": {},
+            "lesions": [],
+            "lymph_nodes": [],
+            "metastases": [],
+            "artifacts": []
+        }
+    
+    # Write combined JSON file
+    json_path = os.path.join(study_dir, f"{filename}.json")
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(case.model_dump(), f, indent=2)
+        json.dump(combined_data, f, indent=2)
 
 def parse_stage_dist(arg: str) -> Dict[str,float]:
     # I:0.2,II:0.25,III:0.35,IV:0.2
@@ -764,42 +869,7 @@ def parse_response_dist(arg: str) -> Dict[str,float]:
         out[k] /= s
     return out
 
-def parse_radlex_dist(arg: str) -> Dict[str,float]:
-    # minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1
-    parts = [p for p in arg.split(',') if p]
-    out = {}
-    for p in parts:
-        k,v = p.split(':')
-        config_name = k.strip()
-        if config_name not in PREDEFINED_CONFIGS:
-            raise ValueError(f"Unknown RadLex config: {config_name}. Available: {list(PREDEFINED_CONFIGS.keys())}")
-        out[config_name] = float(v)
-    s = sum(out.values())
-    if s <= 0: raise ValueError("RadLex distribution must sum > 0")
-    # normalize
-    for k in out:
-        out[k] /= s
-    return out
 
-def select_radlex_config(radlex_dist: Dict[str, float], rng: random.Random) -> Optional[str]:
-    """Select a RadLex configuration based on the distribution."""
-    if not radlex_dist:
-        return None
-    
-    # Convert to cumulative distribution
-    configs = list(radlex_dist.keys())
-    probs = list(radlex_dist.values())
-    
-    # Select based on probability
-    rand_val = rng.random()
-    cumulative = 0
-    for config, prob in zip(configs, probs):
-        cumulative += prob
-        if rand_val <= cumulative:
-            return config
-    
-    # Fallback to last config
-    return configs[-1] if configs else None
 
 def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime] = None) -> List[dict]:
     """Convert generated cases to JSONL format for the React app"""
@@ -942,7 +1012,7 @@ def main():
     ap.add_argument("--follow-up-days", type=int, default=90, help="Days between baseline and follow-up (default: 90)")
     ap.add_argument("--studies-per-patient", type=int, default=5, help="Maximum number of studies per patient (2-10, default: 5). Each patient will have 1 baseline + 1-{max} follow-up studies")
     ap.add_argument("--response-dist", type=str, default="CR:0.1,PR:0.3,SD:0.4,PD:0.2", help="Response distribution e.g. CR:0.1,PR:0.3,SD:0.4,PD:0.2 (will be normalized)")
-    ap.add_argument("--radlex-dist", type=str, default="standard:1.0", help="RadLex configuration distribution e.g. minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1 (will be normalized)")
+    ap.add_argument("--no-radlex", action="store_true", help="Disable RadLex anatomic mapping (enabled by default)")
     ap.add_argument("--legacy-mode", action="store_true", help="Use legacy flat file structure")
     ap.add_argument("--jsonl", type=str, default=None, help="Output JSONL file for React app (e.g., cohort_labels.jsonl)")
     args = ap.parse_args()
@@ -955,7 +1025,7 @@ def main():
     rng = random.Random(args.seed)
     dist = parse_stage_dist(args.stage_dist)
     response_dist = parse_response_dist(args.response_dist)
-    radlex_dist = parse_radlex_dist(args.radlex_dist)
+    use_radlex = not args.no_radlex
     
     # Collect all cases for JSONL output if requested
     all_cases = []
@@ -966,27 +1036,22 @@ def main():
         
         if args.legacy_mode:
             # Legacy mode: generate baseline and optional follow-up
-            # Select RadLex config for this case
-            radlex_config = select_radlex_config(radlex_dist, rng)
-            
             baseline_case = generate_case(
                 seed=rng.randint(0,10_000_000), 
                 stage_dist=dist, 
                 lobe=args.lobe,
                 patient_id=patient_id,
-                visit_number=1,
-                radlex_complexity=radlex_config
+                visit_number=1
             )
-            write_case(baseline_case, args.out, f"{patient_id}_baseline", radlex_config)
+            write_case(baseline_case, args.out, f"{patient_id}_baseline", use_radlex)
             
             if args.follow_up:
                 follow_up_case = generate_follow_up_case(
                     baseline_case, 
                     seed=rng.randint(0,10_000_000),
-                    days_later=args.follow_up_days,
-                    radlex_complexity=radlex_config
+                    days_later=args.follow_up_days
                 )
-                write_case(follow_up_case, args.out, f"{patient_id}_followup", radlex_config)
+                write_case(follow_up_case, args.out, f"{patient_id}_followup", use_radlex)
         else:
             # New mode: generate complete patient timeline
             cases, study_dates = generate_patient_timeline(
@@ -995,13 +1060,12 @@ def main():
                 stage_dist=dist,
                 lobe=args.lobe,
                 max_studies=args.studies_per_patient,
-                response_dist=response_dist,
-                radlex_dist=radlex_dist
+                response_dist=response_dist
             )
             
-            # Write all cases for this patient (RadLex config already selected per case)
+            # Write all cases for this patient
             for case in cases:
-                write_case(case, args.out, case.meta.accession_number, case.meta.radlex_complexity)
+                write_case(case, args.out, case.meta.accession_number, use_radlex)
             
             # Collect for JSONL output
             all_cases.extend(cases)

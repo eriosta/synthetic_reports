@@ -38,8 +38,8 @@ class SynthRadConfig:
     # Response tracking
     response_distribution: str = "CR:0.1,PR:0.3,SD:0.4,PD:0.2"
     
-    # RadLex enhancement
-    radlex_distribution: str = "standard:1.0"
+    # RadLex anatomic mapping
+    use_radlex: bool = True
     
     # Output options
     legacy_mode: bool = False
@@ -80,7 +80,6 @@ class SynthRadConfig:
         # Validate distributions
         self._validate_distribution(self.stage_distribution, ["I", "II", "III", "IV"])
         self._validate_distribution(self.response_distribution, ["CR", "PR", "SD", "PD"])
-        self._validate_distribution(self.radlex_distribution, ["minimal", "standard", "aggressive", "conservative"])
     
     def _validate_distribution(self, dist_str: str, valid_keys: List[str]):
         """Validate distribution string format."""
@@ -131,8 +130,8 @@ class SynthRadConfig:
         if self.response_distribution != "CR:0.1,PR:0.3,SD:0.4,PD:0.2":
             args.extend(["--response-dist", self.response_distribution])
         
-        if self.radlex_distribution != "standard:1.0":
-            args.extend(["--radlex-dist", self.radlex_distribution])
+        if not self.use_radlex:
+            args.extend(["--no-radlex"])
         
         if self.legacy_mode:
             args.append("--legacy-mode")

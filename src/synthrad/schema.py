@@ -9,7 +9,6 @@ class Meta(BaseModel):
     visit_number: int = 1  # 1 = baseline, 2 = follow-up, etc.
     accession_number: Optional[str] = None
     radiologist_style: Optional[str] = None  # Different writing styles
-    radlex_complexity: Optional[str] = None  # RadLex enhancement level used
 
 class Primary(BaseModel):
     lobe: str

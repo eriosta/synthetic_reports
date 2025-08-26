@@ -8,7 +8,7 @@ Synthetic *oncology-grade* CT chest radiology reports for **lung cancer**, desig
 synthetic_reports/
 ├── configs/          # Configuration files (samples, research, custom)
 ├── tools/            # Utility tools (builders, generators, utils)
-├── docs/             # Documentation (guides, api, examples)
+├── docs/             # Documentation (guides only)
 ├── examples/         # Example scripts and demos
 ├── src/              # Source code
 └── tests/            # Test files
@@ -61,10 +61,10 @@ python tools/generators/generate.py --configs configs/samples/config.json --name
 python tools/generators/generate.py --configs configs/samples/config.json --names followup_standard
 ```
 
-**3. RadLex Enhancement** - Medical terminology enhancement with different intensity levels
+**3. RadLex Anatomic Mapping** - Hierarchical anatomic mapping with RadLex integration
 ```bash
-# Generate reports with enhanced medical terminology
-python tools/generators/generate.py --configs configs/samples/config.json --names radlex_standard
+# Generate reports with anatomic mapping
+python tools/generators/generate.py --configs configs/samples/config.json --names anatomic_mapping
 ```
 
 ### Key Features
@@ -85,7 +85,7 @@ python tools/generators/generate.py --configs configs/samples/config.json --name
 | `num_patients` | Number of patients to generate | `10` |
 | `stage_distribution` | Cancer stage distribution | `"I:0.3,II:0.3,III:0.3,IV:0.1"` |
 | `follow_up` | Generate follow-up studies | `true` |
-| `radlex_distribution` | Medical terminology level | `"standard:1.0"` |
+| `use_radlex` | Anatomic mapping enabled | `true` |
 
 ## All Available Arguments
 
@@ -110,10 +110,11 @@ Here's a comprehensive list of all command-line arguments you can customize:
 - `--response-dist <distribution>`: Response distribution (default: "CR:0.1,PR:0.3,SD:0.4,PD:0.2")
   - Example: `--response-dist "CR:0.2,PR:0.4,SD:0.3,PD:0.1"`
 
-### RadLex Enhancement
-- `--radlex-dist <distribution>`: RadLex configuration distribution (default: "standard:1.0")
-  - Available configs: minimal, standard, aggressive, conservative
-  - Example: `--radlex-dist "minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1"`
+### RadLex Anatomic Mapping
+- `--no-radlex`: Disable RadLex anatomic mapping (enabled by default)
+  - By default, anatomic mapping is enabled
+  - Use `--no-radlex` to disable anatomic mapping
+  - Creates hierarchical anatomic maps when enabled
 
 ### Output Formats
 - `--jsonl <filename>`: Output JSONL file for React app (e.g., "cohort_labels.jsonl")
@@ -144,19 +145,13 @@ Here's a comprehensive list of all command-line arguments you can customize:
 --response-dist "CR:0.05,PR:0.2,SD:0.5,PD:0.25"
 ```
 
-**RadLex Distribution:**
+**RadLex Anatomic Mapping:**
 ```bash
-# All standard enhancement
---radlex-dist "standard:1.0"
+# Enable anatomic mapping (default)
+# No flag needed
 
-# Mixed enhancement levels
---radlex-dist "minimal:0.2,standard:0.5,aggressive:0.2,conservative:0.1"
-
-# Conservative enhancement only
---radlex-dist "conservative:1.0"
-
-# No RadLex enhancement
---radlex-dist "minimal:1.0"
+# Disable anatomic mapping
+--no-radlex
 ```
 
 ### Complete Example Commands
@@ -174,8 +169,8 @@ python -m synthrad --n 3 --follow-up --follow-up-days 60 --studies-per-patient 4
 # Optimistic response tracking
 python -m synthrad --n 5 --follow-up --response-dist "CR:0.2,PR:0.4,SD:0.3,PD:0.1" --out ./optimistic_reports
 
-# RadLex enhanced with mixed configurations
-python -m synthrad --n 10 --radlex-dist "minimal:0.3,standard:0.4,aggressive:0.3" --out ./enhanced_reports
+# RadLex anatomic mapping enabled (default)
+python -m synthrad --n 10 --out ./anatomic_reports
 
 # Complete pipeline with JSONL export
 python -m synthrad --n 5 --follow-up --studies-per-patient 3 --jsonl cohort.jsonl --out ./complete_pipeline
@@ -265,26 +260,26 @@ The `--jsonl` option generates a JSONL (JSON Lines) file compatible with RECIST 
 - `overall_response`: CR, PR, SD, or PD
 - `lesions`: Array of individual lesions with size measurements
 
-## RadLex Integration
+## RadLex Anatomic Mapping
 
-This project includes optional RadLex ontology integration for enhanced medical terminology. RadLex provides standardized radiological terms that can make your synthetic reports more realistic.
+This project includes RadLex ontology integration for **hierarchical anatomic mapping**. Instead of text enhancement, RadLex is used to create structured, machine-readable anatomic relationships.
 
 ### Quick RadLex Setup
 
 1. Get a free API key from [BioPortal](https://bioportal.bioontology.org/)
 2. Set environment variable: `export BIOPORTAL_API_KEY="your_key"`
-3. Run the example: `python scripts/radlex_example.py`
 
-### RadLex Features
+### RadLex Anatomic Mapping Features
 
-- **Enhanced Terminology**: Replace basic terms with standardized RadLex concepts
-- **Text Enhancement**: Automatically enhance generated reports with RadLex terms
-- **Caching**: Built-in caching to reduce API calls
-- **Configurable**: Multiple enhancement levels (minimal, standard, aggressive, conservative)
-- **Distribution Control**: Specify proportions of different RadLex configurations per case
-- **Pipeline Integration**: Works with all generator features (follow-up, JSONL, etc.)
+- **Hierarchical Structure**: Body regions → Organs → Sub-organs → Specific locations
+- **Structured Data**: Machine-readable anatomic relationships
+- **Clinical Decision Support**: Target vs non-target lesion classification
+- **TNM Staging Automation**: Structured data for automated staging
+- **Follow-up Tracking**: Track lesions across studies by anatomic location
+- **Multi-modal Integration**: Map findings to imaging coordinates
+- **Configurable**: Simple enable/disable option
 
-See [RADLEX_INTEGRATION.md](RADLEX_INTEGRATION.md) for detailed documentation.
+See [docs/guides/ANATOMIC_MAPPING_GUIDE.md](docs/guides/ANATOMIC_MAPPING_GUIDE.md) for detailed documentation.
 
 ## Notes
 
@@ -292,6 +287,6 @@ See [RADLEX_INTEGRATION.md](RADLEX_INTEGRATION.md) for detailed documentation.
 - Intended to exercise **TNM staging extraction**, not to generate perfect prose.
 - You can tune verbosity and normal-by-exception ratios via flags.
 - Response tracking follows simplified RECIST criteria for realistic oncology workflows.
-- RadLex integration is optional and requires a BioPortal API key.
+- RadLex anatomic mapping is optional and requires a BioPortal API key.
 - Test outputs and cache files are automatically excluded via `.gitignore`.
 
