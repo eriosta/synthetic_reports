@@ -902,112 +902,287 @@ def parse_response_dist(arg: str) -> Dict[str,float]:
 
 def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime] = None) -> List[dict]:
     """
-    Convert cases to RECIST 1.1 compliant JSONL format.
+    RECIST 1.1–style export with:
+      - Baseline target selection: ≤5 total, ≤2 per organ
+        * Non-nodal target eligibility: longest >= 10 mm
+        * Nodal target eligibility: short-axis >= 15 mm
+      - Frozen target set across timepoints
+      - SLD from the frozen target set
+      - PD by SLD: ≥20% over nadir AND ≥5 mm absolute increase
+      - CR: all target & non-target lesions resolved; all nodes < 10 mm SA
+      - New lesions -> PD
+      - Optional: non-target unequivocal progression flag (nt_unequivocal_progression)
     """
-    jsonl_data = []
-    for i, case in enumerate(cases):
-        # Get RECIST 1.1 compliant target and non-target lesions
-        targets = select_recist_targets(case.primary, case.nodes, case.mets)
-        nontargets = classify_nontarget_lesions(case.primary, case.nodes, case.mets, targets)
-        
-        # Calculate SLD for target lesions only
-        sld_mm = calculate_sld(targets)
-        
-        # Build lesions list with proper RECIST 1.1 classification
-        lesions = []
-        
-        # Add target lesions
-        for target in targets:
-            lesion_entry = {
-                "lesion_id": target["lesion_id"],
-                "kind": target["type"],
-                "organ": target["organ"],
-                "rule": target["measurement_type"],
-                "baseline_mm": target["size_mm"] if case.meta.visit_number == 1 else None,
-                "follow_mm": target["size_mm"] if case.meta.visit_number > 1 else None,
-                "size_mm_current": target["size_mm"],
-                "target": True,
-                "suspicious": True
-            }
-            
-            # Add organ-specific fields
-            if target["type"] == "primary":
-                lesion_entry["location"] = case.primary.lobe
-                lesion_entry["margin"] = "spiculated" if "spiculation" in case.primary.features else "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = "cavitation" in case.primary.features
-            elif target["type"] == "node":
-                lesion_entry["station"] = target["station"]
-                lesion_entry["margin"] = "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = False
-            elif target["type"] == "metastasis":
-                lesion_entry["location"] = target["organ"]
-                lesion_entry["margin"] = "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = False
-            
-            lesions.append(lesion_entry)
-        
-        # Add non-target lesions
-        for nontarget in nontargets:
-            lesion_entry = {
-                "lesion_id": nontarget["lesion_id"],
-                "kind": nontarget["type"],
-                "organ": nontarget["organ"],
-                "rule": "longest" if nontarget["type"] != "node" else "short_axis",
-                "baseline_mm": nontarget["size_mm"] if case.meta.visit_number == 1 else None,
-                "follow_mm": nontarget["size_mm"] if case.meta.visit_number > 1 else None,
-                "size_mm_current": nontarget["size_mm"],
-                "target": False,
-                "suspicious": True,
-                "reason": nontarget["reason"]
-            }
-            
-            # Add organ-specific fields
-            if nontarget["type"] == "primary":
-                lesion_entry["location"] = case.primary.lobe
-                lesion_entry["margin"] = "spiculated" if "spiculation" in case.primary.features else "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = "cavitation" in case.primary.features
-            elif nontarget["type"] == "node":
-                lesion_entry["station"] = nontarget["station"]
-                lesion_entry["margin"] = "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = False
-            elif nontarget["type"] == "metastasis":
-                lesion_entry["location"] = nontarget["organ"]
-                lesion_entry["margin"] = "smooth"
-                lesion_entry["enhancement"] = "enhancing"
-                lesion_entry["necrosis"] = False
-            
-            lesions.append(lesion_entry)
-        
-        # Determine study date
-        if study_dates and i < len(study_dates):
-            study_date = study_dates[i].strftime("%Y-%m-%d")
-        else:
-            if case.meta.visit_number == 1:
-                study_date = (datetime.datetime.now() - datetime.timedelta(days=random.randint(365, 730))).strftime("%Y-%m-%d")
-            else:
-                baseline_days_ago = random.randint(365, 730)
-                follow_up_days_ago = baseline_days_ago - (case.meta.visit_number - 1) * random.randint(30, 180)
-                study_date = (datetime.datetime.now() - datetime.timedelta(days=follow_up_days_ago)).strftime("%Y-%m-%d")
+    # ---------- helpers ----------
+    def is_nodal_target(mm: int) -> bool:
+        return mm >= 15  # RECIST 1.1 nodal target threshold (short axis)
 
-        # Create RECIST 1.1 compliant entry
-        entry = {
-            "patient_id": case.meta.patient_id,
-            "timepoint": case.meta.visit_number - 1,
-            "study_date": study_date,
-            "baseline_sld_mm": sld_mm if case.meta.visit_number == 1 else None,
-            "current_sld_mm": sld_mm,
-            "nadir_sld_mm": None,
-            "overall_response": case.response_status or "SD",
-            "target_lesions": len(targets),
-            "nontarget_lesions": len(nontargets),
-            "lesions": lesions
-        }
-        jsonl_data.append(entry)
+    def is_nonnodal_target(mm: int) -> bool:
+        return mm >= 10  # RECIST 1.1 non-nodal target threshold (longest)
+
+    def organ_key_from_lesion(lesion: dict) -> str:
+        # group per organ for the ≤2 per organ rule
+        k = lesion.get("organ") or lesion.get("location") or "unknown"
+        # treat all lymph nodes as single organ "lymph_node"
+        return "lymph_node" if k == "lymph_node" else k
+
+    # ID builders (match your original scheme)
+    def make_lesion_id_primary(lobe: str) -> str:
+        return f"primary_{lobe}"
+
+    def make_lesion_id_node(station: str, j: int) -> str:
+        return f"ln_{station}_{j}"
+
+    def make_lesion_id_met(site: str, j: int) -> str:
+        return f"met_{site}_{j}"
+
+    # Pull studies per patient in chronological order
+    from collections import defaultdict
+    per_patient: dict[str, list[tuple[datetime.datetime, Case]]] = defaultdict(list)
+    for i, case in enumerate(cases):
+        dt = study_dates[i] if (study_dates and i < len(study_dates)) else datetime.datetime.now()
+        per_patient[case.meta.patient_id].append((dt, case))
+    for pid in per_patient:
+        per_patient[pid].sort(key=lambda t: t[0])  # ascending by date
+
+    jsonl_data = []
+
+    # State carried per patient
+    for pid, timeline in per_patient.items():
+        baseline_targets_ids: list[str] = []
+        baseline_targets_meta: dict[str, dict] = {}  # lesion_id -> {organ, baseline_mm}
+        nadir_sld: int | None = None
+        known_lesions_prev: set[str] = set()  # to detect new lesions
+
+        # --- iterate each timepoint ---
+        for tp, (dt, case) in enumerate(timeline):
+            # 1) Collect lesions from current case in the SAME ID scheme every time
+            lesions_current: list[dict] = []
+            sld_current = 0
+
+            # primary (non-nodal, longest)
+            if case.primary:
+                lid = make_lesion_id_primary(case.primary.lobe)
+                lesions_current.append({
+                    "lesion_id": lid,
+                    "kind": "primary",
+                    "organ": "lung",
+                    "location": case.primary.lobe,
+                    "rule": "longest",
+                    "size_mm_current": case.primary.size_mm,
+                    "margin": "spiculated" if "spiculation" in case.primary.features else "smooth",
+                    "necrosis": "cavitation" in case.primary.features,
+                    "suspicious": True
+                })
+
+            # lymph nodes (short axis)
+            for j, node in enumerate(case.nodes):
+                lid = make_lesion_id_node(node.station, j)
+                lesions_current.append({
+                    "lesion_id": lid,
+                    "kind": "ln",
+                    "organ": "lymph_node",
+                    "station": node.station,
+                    "rule": "short_axis",
+                    "size_mm_current": node.short_axis_mm,
+                    "margin": "smooth",
+                    "necrosis": False,
+                    "suspicious": True
+                })
+
+            # metastases (non-nodal, longest)
+            for j, met in enumerate(case.mets):
+                lid = make_lesion_id_met(met.site, j)
+                lesions_current.append({
+                    "lesion_id": lid,
+                    "kind": "met",
+                    "organ": met.site,
+                    "location": met.site,
+                    "rule": "longest",
+                    "size_mm_current": met.size_mm,
+                    "margin": "smooth",
+                    "necrosis": False,
+                    "suspicious": True
+                })
+
+            # 2) BASELINE: choose target set (freeze it)
+            if tp == 0:
+                # candidate targets with eligibility flags
+                candidates = []
+                for les in lesions_current:
+                    size = les["size_mm_current"] or 0
+                    eligible = False
+                    if les["kind"] == "ln":
+                        eligible = is_nodal_target(size)
+                    else:
+                        eligible = is_nonnodal_target(size)
+                    les["target_eligible"] = eligible
+                    if eligible:
+                        candidates.append(les)
+
+                # sort by size desc, select ≤5 total with ≤2 per organ
+                candidates.sort(key=lambda d: d["size_mm_current"], reverse=True)
+                organ_count: dict[str, int] = {}
+                for les in candidates:
+                    if len(baseline_targets_ids) >= 5:
+                        break
+                    org = organ_key_from_lesion(les)
+                    if organ_count.get(org, 0) >= 2:
+                        continue
+                    baseline_targets_ids.append(les["lesion_id"])
+                    baseline_targets_meta[les["lesion_id"]] = {
+                        "organ": org,
+                        "baseline_mm": int(les["size_mm_current"])
+                    }
+                    organ_count[org] = organ_count.get(org, 0) + 1
+
+            # 3) Attach baseline/follow sizes and target flags; compute SLD from frozen targets
+            #    Any baseline target not seen now counts as size 0 (disappeared)
+            id_to_les = {l["lesion_id"]: l for l in lesions_current}
+
+            # annotate all current lesions (non-targets will be added too)
+            for les in lesions_current:
+                lid = les["lesion_id"]
+                les["baseline_mm"] = baseline_targets_meta.get(lid, {}).get("baseline_mm")
+                # follow_mm is only for post-baseline timepoints, for readability
+                les["follow_mm"] = les["size_mm_current"] if tp > 0 else None
+                les["target"] = (lid in baseline_targets_ids)
+                # RECIST eligibility reason if not a target
+                if not les["target"]:
+                    if les["kind"] == "ln":
+                        if les["size_mm_current"] >= 10:
+                            les["reason"] = "non-target (10–14 mm node)"
+                        else:
+                            les["reason"] = "too_small"
+                    else:
+                        if les["size_mm_current"] >= 10:
+                            # eligible non-nodal that wasn't selected due to caps (≤5 or ≤2/organ)
+                            les["reason"] = "non-target (exceeds per-organ/total cap)"
+                        else:
+                            les["reason"] = "too_small"
+
+            # ensure all baseline targets appear even if disappeared
+            for lid in baseline_targets_ids:
+                if lid not in id_to_les:
+                    # fabricate a 0-size entry to keep the target set complete
+                    meta = baseline_targets_meta[lid]
+                    lesions_current.append({
+                        "lesion_id": lid,
+                        "kind": "unknown",
+                        "organ": meta["organ"],
+                        "rule": "longest",
+                        "size_mm_current": 0,
+                        "baseline_mm": meta["baseline_mm"],
+                        "follow_mm": 0 if tp > 0 else None,
+                        "target": True
+                    })
+
+            # SLD = sum(target sizes now)
+            sld_current = sum(int(l["size_mm_current"]) for l in lesions_current if l.get("target"))
+
+            # 4) Determine response (RECIST 1.1)
+            if tp == 0:
+                overall = "Baseline"
+                baseline_sld = sld_current
+                nadir_sld = None  # defined after first follow-up
+            else:
+                # new measurable lesion? (≥10 mm non-nodal OR ≥15 mm nodal), unseen before
+                current_ids = {l["lesion_id"] for l in lesions_current}
+                new_ids = current_ids - known_lesions_prev
+                new_measurable = False
+                for l in lesions_current:
+                    if l["lesion_id"] in new_ids:
+                        sz = int(l.get("size_mm_current") or 0)
+                        if l["kind"] == "ln":
+                            if sz >= 15:
+                                new_measurable = True
+                                break
+                        else:
+                            if sz >= 10:
+                                new_measurable = True
+                                break
+
+                # compute baseline_sld from frozen set
+                baseline_sld = sum(baseline_targets_meta[lid]["baseline_mm"] for lid in baseline_targets_ids) if baseline_targets_ids else 0
+
+                # update nadir (= minimum post-baseline SLD)
+                if nadir_sld is None:
+                    nadir_sld = sld_current
+                else:
+                    nadir_sld = min(nadir_sld, sld_current)
+
+                # Non-target unequivocal progression hook (set False by default)
+                nt_unequivocal_progression = False  # set True via your own logic if desired
+
+                # CR check: all targets 0 AND no non-target disease, and all nodes < 10 mm SA
+                all_targets_zero = all(int(l["size_mm_current"]) == 0 for l in lesions_current if l.get("target"))
+                any_nontarget_residual = any(int(l["size_mm_current"]) > 0 for l in lesions_current if not l.get("target"))
+                any_node_ge_10 = any((l["kind"] == "ln" and int(l["size_mm_current"]) >= 10) for l in lesions_current)
+
+                if new_measurable:
+                    overall = "Progressive disease (new lesions)"
+                elif nt_unequivocal_progression:
+                    overall = "Progressive disease (unequivocal progression of non-target disease)"
+                elif all_targets_zero and (not any_nontarget_residual) and (not any_node_ge_10):
+                    overall = "Complete response"
+                else:
+                    # PR / PD by SLD, else SD
+                    # PR: ≥30% decrease from BASELINE SLD
+                    if baseline_sld and (sld_current <= 0.70 * baseline_sld):
+                        overall = "Partial response"
+                    else:
+                        # PD by SLD: ≥20% increase over NADIR AND ≥5 mm absolute
+                        if (nadir_sld is not None) and (sld_current - nadir_sld >= 5) and (sld_current >= 1.20 * nadir_sld):
+                            overall = "Progressive disease (≥20% and ≥5 mm increase from nadir)"
+                        else:
+                            overall = "Stable disease"
+
+            # 5) counts
+            target_ct = sum(1 for l in lesions_current if l.get("target"))
+            nontarget_ct = sum(1 for l in lesions_current if (not l.get("target")) and int(l.get("size_mm_current") or 0) > 0)
+
+            # 6) package record
+            rec = {
+                "patient_id": pid,
+                "timepoint": tp,
+                "study_date": dt.strftime("%Y-%m-%d"),
+                "baseline_sld_mm": baseline_sld if tp == 0 else None,
+                "current_sld_mm": sld_current if tp > 0 or tp == 0 else None,
+                "nadir_sld_mm": nadir_sld,
+                "target_lesions": target_ct,
+                "nontarget_lesions": nontarget_ct,
+                "overall_response": overall,
+                "lesions": []
+            }
+
+            # Keep lesion list stable order: targets first by id, then non-targets
+            lesions_current.sort(key=lambda d: (not d.get("target"), d["lesion_id"]))
+            for l in lesions_current:
+                out = {
+                    "lesion_id": l["lesion_id"],
+                    "kind": "node" if l["kind"] == "ln" else ("metastasis" if l["kind"] == "met" else l["kind"]),
+                    "organ": l.get("organ"),
+                    "location": l.get("location"),
+                    "station": l.get("station"),
+                    "rule": l.get("rule"),
+                    "size_mm_current": int(l.get("size_mm_current") or 0),
+                    "baseline_mm": int(l["baseline_mm"]) if l.get("baseline_mm") is not None else None,
+                    "follow_mm": int(l["follow_mm"]) if l.get("follow_mm") is not None else None,
+                    "margin": l.get("margin", "smooth"),
+                    "necrosis": bool(l.get("necrosis", False)),
+                    "suspicious": bool(l.get("suspicious", True)),
+                    "target": bool(l.get("target", False))
+                }
+                if not out["target"] and "reason" in l:
+                    out["reason"] = l["reason"]
+                rec["lesions"].append(out)
+
+            jsonl_data.append(rec)
+
+            # 7) update seen lesions for new-lesion detection
+            known_lesions_prev |= {l["lesion_id"] for l in lesions_current}
+
+        # end per patient
     return jsonl_data
 
 def main():
