@@ -234,8 +234,24 @@ RADIOLOGIST_STYLES = {
 }
 
 # -----------------------
-# Comparison / RECIST / PET utilities
+# RECIST 1.1 Compliance
 # -----------------------
+
+# RECIST 1.1 Target lesion selection rules
+RECIST_TARGET_RULES = {
+    "max_total_targets": 5,
+    "max_per_organ": 2,
+    "min_size_mm": 10,  # Minimum size for target lesions
+    "node_min_size_mm": 10,  # Minimum short-axis for target nodes
+}
+
+# RECIST 1.1 Response thresholds
+RECIST_THRESHOLDS = {
+    "partial_response": -30,  # ≥30% decrease in SLD
+    "progressive_disease": 20,  # ≥20% increase in SLD
+    "new_lesion_size_mm": 5,  # Minimum size for new lesions to count as PD
+}
+
 def fmt_mm(mm: int) -> str:
     return f"{mm} mm" if mm < 100 else f"{mm/10:.1f} cm"
 
@@ -252,17 +268,141 @@ def compare_size(curr_mm: int, prior_mm: int|None) -> str:
         change = "decreased"
     return f"{change} (now {fmt_mm(curr_mm)}, was {fmt_mm(prior_mm)}; Δ {delta:+} mm, {pct:+.0f}%)."
 
-def recist_overall_response(sum_curr: int, sum_prior: int|None, new_lesions: bool=False) -> str:
+def select_recist_targets(primary, nodes, mets):
+    """
+    Select target lesions according to RECIST 1.1 rules:
+    - Up to 5 target lesions total
+    - Up to 2 per organ
+    - Minimum 10mm for non-nodal lesions
+    - Minimum 10mm short-axis for lymph nodes
+    """
+    targets = []
+    organ_counts = {}
+    
+    # Primary tumor (if ≥10mm)
+    if primary and primary.size_mm >= RECIST_TARGET_RULES["min_size_mm"]:
+        if len(targets) < RECIST_TARGET_RULES["max_total_targets"]:
+            targets.append({
+                "type": "primary",
+                "organ": "lung",
+                "size_mm": primary.size_mm,
+                "measurement_type": "longest",
+                "lesion_id": f"lung-{primary.lobe}-longest-1"
+            })
+            organ_counts["lung"] = 1
+    
+    # Lymph nodes (if ≥10mm short-axis)
+    for i, node in enumerate(nodes):
+        if (node.short_axis_mm >= RECIST_TARGET_RULES["node_min_size_mm"] and 
+            len(targets) < RECIST_TARGET_RULES["max_total_targets"] and
+            organ_counts.get("lymph_node", 0) < RECIST_TARGET_RULES["max_per_organ"]):
+            targets.append({
+                "type": "node",
+                "organ": "lymph_node",
+                "size_mm": node.short_axis_mm,
+                "measurement_type": "short_axis",
+                "station": node.station,
+                "lesion_id": f"ln-{node.station}-shortaxis-{i+1}"
+            })
+            organ_counts["lymph_node"] = organ_counts.get("lymph_node", 0) + 1
+    
+    # Metastases (if ≥10mm)
+    for i, met in enumerate(mets):
+        if (met.size_mm >= RECIST_TARGET_RULES["min_size_mm"] and 
+            len(targets) < RECIST_TARGET_RULES["max_total_targets"] and
+            organ_counts.get(met.site, 0) < RECIST_TARGET_RULES["max_per_organ"]):
+            targets.append({
+                "type": "metastasis",
+                "organ": met.site,
+                "size_mm": met.size_mm,
+                "measurement_type": "longest",
+                "lesion_id": f"{met.site.replace('_', '-')}-longest-{i+1}"
+            })
+            organ_counts[met.site] = organ_counts.get(met.site, 0) + 1
+    
+    return targets
+
+def calculate_sld(targets):
+    """Calculate Sum of Longest Diameters (SLD) for target lesions."""
+    return sum(target["size_mm"] for target in targets)
+
+def classify_nontarget_lesions(primary, nodes, mets, targets):
+    """Classify lesions as non-target based on RECIST 1.1 rules."""
+    nontargets = []
+    target_ids = {target["lesion_id"] for target in targets}
+    
+    # Primary tumor (if not selected as target)
+    if primary:
+        primary_id = f"lung-{primary.lobe}-longest-1"
+        if primary_id not in target_ids:
+            nontargets.append({
+                "type": "primary",
+                "organ": "lung",
+                "size_mm": primary.size_mm,
+                "lesion_id": primary_id,
+                "reason": "not_selected" if primary.size_mm >= RECIST_TARGET_RULES["min_size_mm"] else "too_small"
+            })
+    
+    # Lymph nodes (if not selected as targets)
+    for i, node in enumerate(nodes):
+        node_id = f"ln-{node.station}-shortaxis-{i+1}"
+        if node_id not in target_ids:
+            nontargets.append({
+                "type": "node",
+                "organ": "lymph_node",
+                "size_mm": node.short_axis_mm,
+                "station": node.station,
+                "lesion_id": node_id,
+                "reason": "not_selected" if node.short_axis_mm >= RECIST_TARGET_RULES["node_min_size_mm"] else "too_small"
+            })
+    
+    # Metastases (if not selected as targets)
+    for i, met in enumerate(mets):
+        met_id = f"{met.site.replace('_', '-')}-longest-{i+1}"
+        if met_id not in target_ids:
+            nontargets.append({
+                "type": "metastasis",
+                "organ": met.site,
+                "size_mm": met.size_mm,
+                "lesion_id": met_id,
+                "reason": "not_selected" if met.size_mm >= RECIST_TARGET_RULES["min_size_mm"] else "too_small"
+            })
+    
+    return nontargets
+
+def recist_overall_response(sld_current: int, sld_prior: int|None, 
+                          nontarget_progression: bool = False, 
+                          new_lesions: bool = False) -> str:
+    """
+    Calculate RECIST 1.1 overall response assessment.
+    
+    Args:
+        sld_current: Current sum of longest diameters
+        sld_prior: Prior sum of longest diameters (None for baseline)
+        nontarget_progression: Unequivocal progression of non-target disease
+        new_lesions: New lesions present
+    """
     if new_lesions:
-        return "Progressive disease (new lesions)."
-    if sum_prior is None:
-        return "Baseline (no prior)."
-    pct = (sum_curr - sum_prior)/sum_prior*100 if sum_prior else 0
-    if pct <= -30:
-        return "Partial response."
-    if pct < 20:
-        return "Stable disease."
-    return "Progressive disease (≥20% increase)."
+        return "Progressive disease (new lesions)"
+    
+    if nontarget_progression:
+        return "Progressive disease (unequivocal progression of non-target disease)"
+    
+    if sld_prior is None or sld_prior == 0:
+        # Handle baseline or zero prior SLD cases
+        if sld_current == 0:
+            return "Complete response (no measurable disease)"
+        else:
+            return "Progressive disease (new measurable disease)"
+    
+    pct_change = ((sld_current - sld_prior) / sld_prior) * 100
+    
+    if pct_change <= RECIST_THRESHOLDS["partial_response"]:
+        return "Partial response"
+    elif pct_change >= RECIST_THRESHOLDS["progressive_disease"]:
+        return "Progressive disease (≥20% increase in SLD)"
+    else:
+        return "Stable disease"
 
 # PET-CT phrases
 PET_PHRASES = {

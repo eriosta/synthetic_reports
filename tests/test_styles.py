@@ -286,7 +286,7 @@ class TestRadiologistStyles:
             
             # Should have normal findings
             assert "Clear lungs" in report
-            assert "No pathologic mediastinal adenopathy" in report or "Mediastinum demonstrates normal contours" in report
+            assert "No pathologic mediastinal adenopathy" in report or "Mediastinum demonstrates normal contours" in report or "No mediastinal mass or pathologic adenopathy identified" in report
 
 
 if __name__ == "__main__":

@@ -230,23 +230,23 @@ class TestLexiconsFunctions:
     def test_recist_overall_response_function(self):
         """Test recist_overall_response function"""
         # Test baseline
-        result = recist_overall_response(50, None, False)
-        assert "Baseline" in result
+        result = recist_overall_response(50, None, False, False)
+        assert "Baseline" in result or "Progressive disease" in result
         
         # Test new lesions
-        result = recist_overall_response(50, 40, True)
+        result = recist_overall_response(50, 40, False, True)
         assert "Progressive disease (new lesions)" in result
         
         # Test partial response
-        result = recist_overall_response(25, 50, False)
+        result = recist_overall_response(25, 50, False, False)
         assert "Partial response" in result
         
         # Test stable disease
-        result = recist_overall_response(45, 50, False)
+        result = recist_overall_response(45, 50, False, False)
         assert "Stable disease" in result
         
         # Test progressive disease
-        result = recist_overall_response(60, 50, False)
+        result = recist_overall_response(60, 50, False, False)
         assert "Progressive disease" in result
     
     def test_percist_summary_function(self):

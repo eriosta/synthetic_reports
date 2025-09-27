@@ -8,7 +8,9 @@ from .lexicons import (
     NODE_STATIONS, NODE_PHRASES, MET_SITES, MET_PHRASES, LIVER_DETAIL_PHRASES,
     RADIOLOGIST_STYLES, PET_PHRASES, TECHNIQUE_CT_CAP, TECHNIQUE_PET_CT,
     mm_desc, node_phrase, fmt_mm, compare_size, recist_overall_response,
-    percist_summary, pick, make_rng, feature_text
+    percist_summary, pick, make_rng, feature_text,
+    select_recist_targets, calculate_sld, classify_nontarget_lesions,
+    RECIST_TARGET_RULES, RECIST_THRESHOLDS
 )
 from .schema import Case, Meta, Primary, Node, Met, TNM
 from .radlex_config import get_config
@@ -285,21 +287,32 @@ def generate_case(seed: int = 0, stage_dist: Dict[str,float] | None = None, lobe
     return Case(meta=meta, primary=primary, nodes=nodes, mets=mets, tnm=tnm, rationale=rationale)
 
 def determine_response_status(baseline_case: Case, follow_up_case: Case) -> str:
-    if not baseline_case.primary or not follow_up_case.primary:
-        return "SD"
-    size_change_pct = ((follow_up_case.primary.size_mm - baseline_case.primary.size_mm) / baseline_case.primary.size_mm) * 100
-    baseline_nodes = len(baseline_case.nodes)
-    follow_up_nodes = len(follow_up_case.nodes)
-    baseline_mets = len(baseline_case.mets)
-    follow_up_mets = len(follow_up_case.mets)
-    if size_change_pct <= -30 and follow_up_nodes <= baseline_nodes and follow_up_mets <= baseline_mets:
-        return "PR"
-    elif size_change_pct >= 20 or follow_up_nodes > baseline_nodes or follow_up_mets > baseline_mets:
-        return "PD"
-    elif size_change_pct <= -100:
-        return "CR"
-    else:
-        return "SD"
+    """
+    Determine RECIST 1.1 response status between baseline and follow-up cases.
+    """
+    # Get target lesions for both cases
+    baseline_targets = select_recist_targets(baseline_case.primary, baseline_case.nodes, baseline_case.mets)
+    follow_up_targets = select_recist_targets(follow_up_case.primary, follow_up_case.nodes, follow_up_case.mets)
+    
+    # Calculate SLD for both cases
+    baseline_sld = calculate_sld(baseline_targets)
+    follow_up_sld = calculate_sld(follow_up_targets)
+    
+    # Check for new lesions (simplified - any new lesions in follow-up)
+    baseline_lesion_ids = {target["lesion_id"] for target in baseline_targets}
+    follow_up_lesion_ids = {target["lesion_id"] for target in follow_up_targets}
+    new_lesions = len(follow_up_lesion_ids - baseline_lesion_ids) > 0
+    
+    # Check for non-target progression (simplified - any new non-target lesions)
+    baseline_nontargets = classify_nontarget_lesions(baseline_case.primary, baseline_case.nodes, baseline_case.mets, baseline_targets)
+    follow_up_nontargets = classify_nontarget_lesions(follow_up_case.primary, follow_up_case.nodes, follow_up_case.mets, follow_up_targets)
+    
+    baseline_nontarget_ids = {nt["lesion_id"] for nt in baseline_nontargets}
+    follow_up_nontarget_ids = {nt["lesion_id"] for nt in follow_up_nontargets}
+    nontarget_progression = len(follow_up_nontarget_ids - baseline_nontarget_ids) > 0
+    
+    # Use RECIST 1.1 response assessment
+    return recist_overall_response(follow_up_sld, baseline_sld, nontarget_progression, new_lesions)
 
 def generate_follow_up_case(baseline_case: Case, seed: int, days_later: int = 90) -> Case:
     rng = random.Random(seed)
@@ -888,95 +901,89 @@ def parse_response_dist(arg: str) -> Dict[str,float]:
     return out
 
 def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime] = None) -> List[dict]:
+    """
+    Convert cases to RECIST 1.1 compliant JSONL format.
+    """
     jsonl_data = []
     for i, case in enumerate(cases):
-        sld_mm = 0
+        # Get RECIST 1.1 compliant target and non-target lesions
+        targets = select_recist_targets(case.primary, case.nodes, case.mets)
+        nontargets = classify_nontarget_lesions(case.primary, case.nodes, case.mets, targets)
+        
+        # Calculate SLD for target lesions only
+        sld_mm = calculate_sld(targets)
+        
+        # Build lesions list with proper RECIST 1.1 classification
         lesions = []
-        if case.primary:
-            sld_mm += case.primary.size_mm
-            lesions.append({
-                "lesion_id": f"primary_{case.primary.lobe}",
-                "kind": "primary",
-                "organ": "lung",
-                "location": case.primary.lobe,
-                "rule": "longest",
-                "baseline_mm": case.primary.size_mm if case.meta.visit_number == 1 else None,
-                "follow_mm": case.primary.size_mm if case.meta.visit_number > 1 else None,
-                "size_mm_current": case.primary.size_mm,
-                "margin": "spiculated" if "spiculation" in case.primary.features else "smooth",
-                "enhancement": "enhancing",
-                "necrosis": "cavitation" in case.primary.features,
+        
+        # Add target lesions
+        for target in targets:
+            lesion_entry = {
+                "lesion_id": target["lesion_id"],
+                "kind": target["type"],
+                "organ": target["organ"],
+                "rule": target["measurement_type"],
+                "baseline_mm": target["size_mm"] if case.meta.visit_number == 1 else None,
+                "follow_mm": target["size_mm"] if case.meta.visit_number > 1 else None,
+                "size_mm_current": target["size_mm"],
+                "target": True,
+                "suspicious": True
+            }
+            
+            # Add organ-specific fields
+            if target["type"] == "primary":
+                lesion_entry["location"] = case.primary.lobe
+                lesion_entry["margin"] = "spiculated" if "spiculation" in case.primary.features else "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = "cavitation" in case.primary.features
+            elif target["type"] == "node":
+                lesion_entry["station"] = target["station"]
+                lesion_entry["margin"] = "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = False
+            elif target["type"] == "metastasis":
+                lesion_entry["location"] = target["organ"]
+                lesion_entry["margin"] = "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = False
+            
+            lesions.append(lesion_entry)
+        
+        # Add non-target lesions
+        for nontarget in nontargets:
+            lesion_entry = {
+                "lesion_id": nontarget["lesion_id"],
+                "kind": nontarget["type"],
+                "organ": nontarget["organ"],
+                "rule": "longest" if nontarget["type"] != "node" else "short_axis",
+                "baseline_mm": nontarget["size_mm"] if case.meta.visit_number == 1 else None,
+                "follow_mm": nontarget["size_mm"] if case.meta.visit_number > 1 else None,
+                "size_mm_current": nontarget["size_mm"],
+                "target": False,
                 "suspicious": True,
-                "target": True
-            })
-        for j, node in enumerate(case.nodes):
-            if node.short_axis_mm >= 10:
-                sld_mm += node.short_axis_mm
-                lesions.append({
-                    "lesion_id": f"ln_{node.station}_{j}",
-                    "kind": "ln",
-                    "organ": "lymph_node",
-                    "station": node.station,
-                    "rule": "short_axis",
-                    "baseline_mm": node.short_axis_mm if case.meta.visit_number == 1 else None,
-                    "follow_mm": node.short_axis_mm if case.meta.visit_number > 1 else None,
-                    "size_mm_current": node.short_axis_mm,
-                    "margin": "smooth",
-                    "enhancement": "enhancing",
-                    "necrosis": False,
-                    "suspicious": True,
-                    "target": True
-                })
-            else:
-                lesions.append({
-                    "lesion_id": f"ln_{node.station}_{j}",
-                    "kind": "ln",
-                    "organ": "lymph_node",
-                    "station": node.station,
-                    "rule": "short_axis",
-                    "baseline_mm": node.short_axis_mm if case.meta.visit_number == 1 else None,
-                    "follow_mm": node.short_axis_mm if case.meta.visit_number > 1 else None,
-                    "size_mm_current": node.short_axis_mm,
-                    "margin": "smooth",
-                    "enhancement": "enhancing",
-                    "necrosis": False,
-                    "suspicious": True,
-                    "target": False
-                })
-        for j, met in enumerate(case.mets):
-            if met.size_mm >= 10:
-                sld_mm += met.size_mm
-                lesions.append({
-                    "lesion_id": f"met_{met.site}_{j}",
-                    "kind": "met",
-                    "organ": met.site,
-                    "location": met.site,
-                    "rule": "longest",
-                    "baseline_mm": met.size_mm if case.meta.visit_number == 1 else None,
-                    "follow_mm": met.size_mm if case.meta.visit_number > 1 else None,
-                    "size_mm_current": met.size_mm,
-                    "margin": "smooth",
-                    "enhancement": "enhancing",
-                    "necrosis": False,
-                    "suspicious": True,
-                    "target": True
-                })
-            else:
-                lesions.append({
-                    "lesion_id": f"met_{met.site}_{j}",
-                    "kind": "met",
-                    "organ": met.site,
-                    "location": met.site,
-                    "rule": "longest",
-                    "baseline_mm": met.size_mm if case.meta.visit_number == 1 else None,
-                    "follow_mm": met.size_mm if case.meta.visit_number > 1 else None,
-                    "size_mm_current": met.size_mm,
-                    "margin": "smooth",
-                    "enhancement": "enhancing",
-                    "necrosis": False,
-                    "suspicious": True,
-                    "target": False
-                })
+                "reason": nontarget["reason"]
+            }
+            
+            # Add organ-specific fields
+            if nontarget["type"] == "primary":
+                lesion_entry["location"] = case.primary.lobe
+                lesion_entry["margin"] = "spiculated" if "spiculation" in case.primary.features else "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = "cavitation" in case.primary.features
+            elif nontarget["type"] == "node":
+                lesion_entry["station"] = nontarget["station"]
+                lesion_entry["margin"] = "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = False
+            elif nontarget["type"] == "metastasis":
+                lesion_entry["location"] = nontarget["organ"]
+                lesion_entry["margin"] = "smooth"
+                lesion_entry["enhancement"] = "enhancing"
+                lesion_entry["necrosis"] = False
+            
+            lesions.append(lesion_entry)
+        
+        # Determine study date
         if study_dates and i < len(study_dates):
             study_date = study_dates[i].strftime("%Y-%m-%d")
         else:
@@ -987,14 +994,17 @@ def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime]
                 follow_up_days_ago = baseline_days_ago - (case.meta.visit_number - 1) * random.randint(30, 180)
                 study_date = (datetime.datetime.now() - datetime.timedelta(days=follow_up_days_ago)).strftime("%Y-%m-%d")
 
+        # Create RECIST 1.1 compliant entry
         entry = {
             "patient_id": case.meta.patient_id,
             "timepoint": case.meta.visit_number - 1,
             "study_date": study_date,
             "baseline_sld_mm": sld_mm if case.meta.visit_number == 1 else None,
-            "current_sld_mm": sld_mm if case.meta.visit_number > 1 else None,
+            "current_sld_mm": sld_mm,
             "nadir_sld_mm": None,
             "overall_response": case.response_status or "SD",
+            "target_lesions": len(targets),
+            "nontarget_lesions": len(nontargets),
             "lesions": lesions
         }
         jsonl_data.append(entry)

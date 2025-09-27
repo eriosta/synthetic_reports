@@ -386,7 +386,7 @@ class TestResponseStatus:
             follow_up.primary.size_mm = int(baseline.primary.size_mm * 0.5)  # 50% reduction
         
         response = determine_response_status(baseline, follow_up)
-        assert response in ["CR", "PR", "SD", "PD"]
+        assert "Progressive disease" in response or "Partial response" in response or "Stable disease" in response or "Baseline" in response
     
     def test_generate_follow_up_case_basic(self):
         """Test generate_follow_up_case function"""
