@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 class Meta(BaseModel):
     modality: Literal["CT chest with IV contrast"] = "CT chest with IV contrast"
     comparison_date: Optional[str] = None
-    prior_therapy: List[str] = []
     patient_id: Optional[str] = None
     visit_number: int = 1  # 1 = baseline, 2 = follow-up, etc.
     accession_number: Optional[str] = None
