@@ -15,6 +15,7 @@ import random
 
 from .radlex_service import get_radlex_service
 from .radlex_config import get_config
+from .radlex_resolver import create_radlex_resolver
 
 
 @dataclass
@@ -85,11 +86,13 @@ class RadLexAnatomicMapper:
     def __init__(self, use_radlex: bool = True, cache_file: Optional[str] = None):
         self.use_radlex = use_radlex
         self.radlex_service = None
+        self.resolver = None
         self.cache_file = cache_file
         
         if use_radlex:
             try:
                 self.radlex_service = get_radlex_service(cache_file=cache_file)
+                self.resolver = create_radlex_resolver(cache_file=cache_file)
             except Exception as e:
                 print(f"Warning: RadLex service unavailable: {e}")
                 self.use_radlex = False
@@ -128,25 +131,20 @@ class RadLexAnatomicMapper:
     
     def map_lung_location(self, lobe: str) -> AnatomicLocation:
         """Map a lung lobe to its anatomic location."""
-        if lobe in ["RUL", "RML", "RLL"]:
-            laterality = "right"
-            parent = "right_lung"
-        elif lobe in ["LUL", "LLL"]:
-            laterality = "left"
-            parent = "left_lung"
-        else:
-            laterality = None
-            parent = None
+        laterality = "right" if lobe in ["RUL","RML","RLL"] else ("left" if lobe in ["LUL","LLL"] else None)
+        parent = "right_lung" if laterality=="right" else ("left_lung" if laterality=="left" else None)
         
-        # Try to get RadLex mapping
-        radlex_id = None
-        radlex_label = None
-        if self.use_radlex and self.radlex_service:
+        # Compose canonical text
+        lobe_map = {"RUL":"right upper lobe of lung","RML":"right middle lobe of lung",
+                    "RLL":"right lower lobe of lung","LUL":"left upper lobe of lung","LLL":"left lower lobe of lung"}
+        term = lobe_map.get(lobe, lobe)
+        
+        radlex_id = radlex_label = None
+        if self.use_radlex and self.resolver:
             try:
-                concept = self.radlex_service.get_concept_by_text(f"{lobe} lobe")
-                if concept:
-                    radlex_id = concept.get("iri")
-                    radlex_label = concept.get("class_label")
+                c = self.resolver.resolve(term, context=["lung","lobe"])
+                if c:
+                    radlex_id, radlex_label = c.get("iri"), c.get("label")
             except Exception:
                 pass
         
@@ -161,23 +159,17 @@ class RadLexAnatomicMapper:
     
     def map_lymph_node_station(self, station: str) -> AnatomicLocation:
         """Map a lymph node station to its anatomic location."""
-        laterality = None
-        if station.endswith("R"):
-            laterality = "right"
-        elif station.endswith("L"):
-            laterality = "left"
-        else:
-            laterality = "central"
+        laterality = "right" if station.endswith("R") else ("left" if station.endswith("L") else "central")
         
-        # Try to get RadLex mapping
-        radlex_id = None
-        radlex_label = None
-        if self.use_radlex and self.radlex_service:
+        # Prefer standard phrase for stations
+        term = f"mediastinal lymph node station {station}"
+        
+        radlex_id = radlex_label = None
+        if self.use_radlex and self.resolver:
             try:
-                concept = self.radlex_service.get_concept_by_text(f"mediastinal lymph node station {station}")
-                if concept:
-                    radlex_id = concept.get("iri")
-                    radlex_label = concept.get("class_label")
+                c = self.resolver.resolve(term, context=["mediastinum","lymph node","station"])
+                if c:
+                    radlex_id, radlex_label = c.get("iri"), c.get("label")
             except Exception:
                 pass
         
@@ -192,55 +184,49 @@ class RadLexAnatomicMapper:
     
     def map_metastatic_site(self, site: str) -> AnatomicLocation:
         """Map a metastatic site to its anatomic location."""
-        # Map common metastatic sites
-        site_mapping = {
-            "liver": {"level": "organ", "parent": "abdomen"},
-            "brain": {"level": "organ", "parent": "central_nervous_system"},
-            "bone": {"level": "system", "parent": "musculoskeletal"},
-            "adrenal_right": {"level": "organ", "parent": "abdomen", "laterality": "right"},
-            "adrenal_left": {"level": "organ", "parent": "abdomen", "laterality": "left"},
-            "kidney_right": {"level": "organ", "parent": "abdomen", "laterality": "right"},
-            "kidney_left": {"level": "organ", "parent": "abdomen", "laterality": "left"}
+        site_map = {
+            "liver": "liver", "brain": "brain", "bone": "bone",
+            "adrenal_right": "right adrenal gland", "adrenal_left": "left adrenal gland",
+            "kidney_right": "right kidney", "kidney_left": "left kidney"
         }
-        
-        site_info = site_mapping.get(site, {"level": "organ", "parent": "unknown"})
-        
-        # Try to get RadLex mapping
-        radlex_id = None
-        radlex_label = None
-        if self.use_radlex and self.radlex_service:
+        term = site_map.get(site, site)
+        parent = "abdomen" if "adrenal" in site or "liver" in site or "kidney" in site else "unknown"
+        laterality = "right" if "right" in term else ("left" if "left" in term else None)
+        level = "organ" if term not in ["bone"] else "system"
+
+        radlex_id = radlex_label = None
+        if self.use_radlex and self.resolver:
             try:
-                concept = self.radlex_service.get_concept_by_text(site)
-                if concept:
-                    radlex_id = concept.get("iri")
-                    radlex_label = concept.get("class_label")
+                c = self.resolver.resolve(term, context=["organ"])
+                if c:
+                    radlex_id, radlex_label = c.get("iri"), c.get("label")
             except Exception:
                 pass
-        
+
         return AnatomicLocation(
-            name=site,
-            radlex_id=radlex_id,
-            radlex_label=radlex_label,
-            parent_location=site_info.get("parent"),
-            level=site_info.get("level"),
-            laterality=site_info.get("laterality")
+            name=site, radlex_id=radlex_id, radlex_label=radlex_label,
+            parent_location=parent, level=level, laterality=laterality
         )
     
     def map_finding_type(self, finding_type: str) -> Tuple[str, Optional[str], Optional[str]]:
         """Map a finding type to RadLex concept."""
-        radlex_id = None
-        radlex_label = None
+        # prefer controlled forms
+        canonical = {
+            "primary_tumor": "mass", "lung mass": "mass",
+            "lymph_node": "lymph node", "enlarged lymph node": "lymph node",
+            "metastasis": "metastasis", "nodule": "nodule"
+        }.get(finding_type.lower(), finding_type)
         
-        if self.use_radlex and self.radlex_service:
+        radlex_id = radlex_label = None
+        if self.use_radlex and self.resolver:
             try:
-                concept = self.radlex_service.get_concept_by_text(finding_type)
-                if concept:
-                    radlex_id = concept.get("iri")
-                    radlex_label = concept.get("class_label")
+                c = self.resolver.resolve(canonical, context=["imaging finding"])
+                if c:
+                    radlex_id, radlex_label = c.get("iri"), c.get("label")
             except Exception:
                 pass
         
-        return finding_type, radlex_id, radlex_label
+        return canonical, radlex_id, radlex_label
     
     def create_anatomic_map(self, case_data: Dict[str, Any], patient_id: str, study_date: str) -> AnatomicMap:
         """Create a hierarchical anatomic map from case data."""

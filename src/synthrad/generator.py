@@ -730,7 +730,7 @@ def generate_report(case: Case, modality: str = "CT", include_recist: bool = Tru
 
     return "\n".join(lines)
 
-def write_case(case: Case, outdir: str, stem: str, use_radlex: bool = True):
+def write_case(case: Case, outdir: str, stem: str, use_radlex: bool = True, ontology_generator=None, study_date=None, ontology_only: bool = False):
     if case.meta.patient_id:
         patient_dir = os.path.join(outdir, case.meta.patient_id)
         study_dir = os.path.join(patient_dir, f"study_{case.meta.visit_number:02d}")
@@ -741,121 +741,251 @@ def write_case(case: Case, outdir: str, stem: str, use_radlex: bool = True):
         study_dir = outdir
         filename = stem
 
+    # Generate report text (needed for ontology config)
     report = generate_report(case)
 
-    # Write TXT
-    txt_path = os.path.join(study_dir, f"{filename}.txt")
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(report)
-
-    combined_data = {
-        "meta": case.meta.model_dump(),
-        "clinical_data": {
-            "primary": case.primary.model_dump() if case.primary else None,
-            "nodes": [node.model_dump() for node in case.nodes],
-            "mets": [met.model_dump() for met in case.mets],
-            "tnm": case.tnm.model_dump(),
-            "rationale": case.rationale,
-            "response_status": case.response_status
-        }
-    }
-
-    if use_radlex:
+    # Generate ontology config if generator is provided
+    if ontology_generator and study_date:
         try:
-            import datetime
-            study_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            anatomic_mapping = {
-                "patient_id": case.meta.patient_id or "unknown",
-                "study_date": study_date,
-                "body_regions": {
-                    "thorax": {
-                        "lungs": {
-                            "right_lung": {"findings": [], "subregions": {}},
-                            "left_lung": {"findings": [], "subregions": {}}
-                        },
-                        "mediastinum": {"lymph_nodes": {"findings": [], "subregions": {}}},
-                        "pleura": {"findings": [], "subregions": {}}
-                    }
-                },
+            # Convert case to the format expected by ontology generator
+            case_data = {
+                "patient_id": case.meta.patient_id,
+                "study_date": study_date.strftime("%Y-%m-%d") if hasattr(study_date, 'strftime') else str(study_date),
+                "timepoint": case.meta.visit_number - 1,  # Convert to 0-based
                 "lesions": [],
-                "lymph_nodes": [],
-                "metastases": [],
-                "artifacts": []
+                "baseline_sld_mm": getattr(case, 'baseline_sld_mm', None),
+                "current_sld_mm": getattr(case, 'current_sld_mm', None),
+                "nadir_sld_mm": getattr(case, 'nadir_sld_mm', None),
+                "overall_response": getattr(case, 'response_status', 'Unknown'),
+                "staging": {
+                    "t_stage": case.tnm.T if case.tnm else None,
+                    "n_stage": case.tnm.N if case.tnm else None,
+                    "m_stage": case.tnm.M if case.tnm else None,
+                    "stage_group": case.tnm.stage_group if case.tnm else None
+                },
+                "findings": report,
+                "impression": report.split("IMPRESSION:")[-1].strip() if "IMPRESSION:" in report else "",
+                "technique": "CT chest, abdomen, and pelvis with IV contrast",
+                "comparison": "None." if case.meta.visit_number == 1 else f"Previous study {case.meta.comparison_date or 'unknown'}"
             }
+            
+            # Add primary tumor
             if case.primary:
-                lung_side = "right_lung" if case.primary.lobe in ["RUL","RML","RLL"] else "left_lung"
-                laterality = "right" if lung_side == "right_lung" else "left"
-                anatomic_mapping["body_regions"]["thorax"]["lungs"][lung_side]["findings"].append({
-                    "type": "primary_tumor",
+                case_data["lesions"].append({
+                    "lesion_id": f"primary_{case.primary.lobe}",
+                    "kind": "primary",
+                    "organ": "lung",
                     "location": case.primary.lobe,
-                    "size_mm": case.primary.size_mm,
-                    "radlex_id": None
+                    "station": None,
+                    "rule": "longest",
+                    "size_mm_current": case.primary.size_mm,
+                    "baseline_mm": case.primary.size_mm if case.meta.visit_number == 1 else None,
+                    "follow_mm": case.primary.size_mm,
+                    "margin": case.primary.features[0] if case.primary.features else "smooth",
+                    "necrosis": False,
+                    "suspicious": True,
+                    "target": True,
+                    "reason": None
                 })
-                anatomic_mapping["lesions"].append({
-                    "finding_type": "primary_tumor",
-                    "anatomic_location": {
-                        "name": case.primary.lobe,
+            
+            # Add lymph nodes
+            for node in case.nodes:
+                case_data["lesions"].append({
+                    "lesion_id": f"ln_{node.station}",
+                    "kind": "node",
+                    "organ": "lymph_node",
+                    "location": None,
+                    "station": node.station,
+                    "rule": "short_axis",
+                    "size_mm_current": node.short_axis_mm,
+                    "baseline_mm": node.short_axis_mm if case.meta.visit_number == 1 else None,
+                    "follow_mm": node.short_axis_mm,
+                    "margin": "smooth",
+                    "necrosis": False,
+                    "suspicious": True,
+                    "target": node.short_axis_mm >= 10,
+                    "reason": "too_small" if node.short_axis_mm < 10 else None
+                })
+            
+            # Add metastases
+            for met in case.mets:
+                case_data["lesions"].append({
+                    "lesion_id": f"met_{met.site}",
+                    "kind": "metastasis",
+                    "organ": met.site,
+                    "location": met.site,
+                    "station": None,
+                    "rule": "longest",
+                    "size_mm_current": met.size_mm,
+                    "baseline_mm": met.size_mm if case.meta.visit_number == 1 else None,
+                    "follow_mm": met.size_mm,
+                    "margin": "smooth",
+                    "necrosis": False,
+                    "suspicious": True,
+                    "target": met.size_mm >= 10,
+                    "reason": "non-target (exceeds per-organ/total cap)" if met.size_mm < 10 else None
+                })
+            
+            # Generate ontology config
+            ontology_config = ontology_generator.generate_ontology_config(
+                case_data=case_data,
+                patient_id=case_data["patient_id"],
+                study_date=case_data["study_date"],
+                timepoint=case_data["timepoint"]
+            )
+            
+            # Save ontology config in the same study directory
+            ontology_filename = f"{filename}_ontology.json"
+            ontology_path = os.path.join(study_dir, ontology_filename)
+            
+            # Convert to dictionary for JSON serialization
+            context_dict = {
+                "cancer_type": ontology_config.context.cancer_type.__dict__,
+                "timepoint": ontology_config.context.timepoint,
+                "recist": ontology_config.context.recist,
+                "staging": ontology_config.context.staging
+            }
+            
+            ontology_data = {
+                "graph_id": ontology_config.graph_id,
+                "patient_id": ontology_config.patient_id,
+                "study": ontology_config.study,
+                "context": context_dict,
+                "nodes": ontology_config.nodes,
+                "edges": ontology_config.edges,
+                "provenance": ontology_config.provenance
+            }
+            
+            with open(ontology_path, 'w') as f:
+                json.dump(ontology_data, f, indent=2)
+                
+        except Exception as e:
+            print(f"Warning: Failed to generate ontology config for {case.meta.patient_id} study {case.meta.visit_number}: {e}")
+    
+    # Generate traditional files only if not ontology_only mode
+    if not ontology_only:
+        # Write TXT
+        txt_path = os.path.join(study_dir, f"{filename}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(report)
+
+        combined_data = {
+            "meta": case.meta.model_dump(),
+            "clinical_data": {
+                "primary": case.primary.model_dump() if case.primary else None,
+                "nodes": [node.model_dump() for node in case.nodes],
+                "mets": [met.model_dump() for met in case.mets],
+                "tnm": case.tnm.model_dump(),
+                "rationale": case.rationale,
+                "response_status": case.response_status
+            },
+            "report_text": report
+        }
+
+        if use_radlex:
+            try:
+                import datetime
+                study_date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                anatomic_mapping = {
+                    "patient_id": case.meta.patient_id or "unknown",
+                    "study_date": study_date_str,
+                    "body_regions": {
+                        "thorax": {
+                            "lungs": {
+                                "right_lung": {"findings": [], "subregions": {}},
+                                "left_lung": {"findings": [], "subregions": {}}
+                            },
+                            "mediastinum": {"lymph_nodes": {"findings": [], "subregions": {}}},
+                            "pleura": {"findings": [], "subregions": {}}
+                        }
+                    },
+                    "lesions": [],
+                    "lymph_nodes": [],
+                    "metastases": [],
+                    "artifacts": []
+                }
+                if case.primary:
+                    lung_side = "right_lung" if case.primary.lobe in ["RUL","RML","RLL"] else "left_lung"
+                    laterality = "right" if lung_side == "right_lung" else "left"
+                    anatomic_mapping["body_regions"]["thorax"]["lungs"][lung_side]["findings"].append({
+                        "type": "primary_tumor",
+                        "location": case.primary.lobe,
+                        "size_mm": case.primary.size_mm,
+                        "radlex_id": None
+                    })
+                    anatomic_mapping["lesions"].append({
+                        "finding_type": "primary_tumor",
+                        "anatomic_location": {
+                            "name": case.primary.lobe,
+                            "radlex_id": None,
+                            "radlex_label": "lung mass",
+                            "parent_location": lung_side,
+                            "level": "lobe",
+                            "laterality": laterality,
+                            "position": None
+                        },
+                        "size_mm": case.primary.size_mm,
+                        "features": case.primary.features,
                         "radlex_id": None,
                         "radlex_label": "lung mass",
-                        "parent_location": lung_side,
-                        "level": "lobe",
-                        "laterality": laterality,
-                        "position": None
-                    },
-                    "size_mm": case.primary.size_mm,
-                    "features": case.primary.features,
-                    "radlex_id": None,
-                    "radlex_label": "lung mass",
-                    "confidence": 1.0,
-                    "target_lesion": True
-                })
-            for node in case.nodes:
-                anatomic_mapping["body_regions"]["thorax"]["mediastinum"]["lymph_nodes"]["findings"].append({
-                    "type": "lymph_node",
-                    "station": node.station,
-                    "size_mm": node.short_axis_mm,
-                    "radlex_id": None
-                })
-                anatomic_mapping["lymph_nodes"].append({
-                    "finding_type": "lymph_node",
-                    "anatomic_location": {
-                        "name": node.station,
+                        "confidence": 1.0,
+                        "target_lesion": True
+                    })
+                for node in case.nodes:
+                    anatomic_mapping["body_regions"]["thorax"]["mediastinum"]["lymph_nodes"]["findings"].append({
+                        "type": "lymph_node",
+                        "station": node.station,
+                        "size_mm": node.short_axis_mm,
+                        "radlex_id": None
+                    })
+                    anatomic_mapping["lymph_nodes"].append({
+                        "finding_type": "lymph_node",
+                        "anatomic_location": {
+                            "name": node.station,
+                            "radlex_id": None,
+                            "radlex_label": "mediastinal lymph node",
+                            "parent_location": "mediastinal_lymph_nodes",
+                            "level": "station",
+                            "laterality": "right" if node.station.endswith("R") else "left" if node.station.endswith("L") else "central",
+                            "position": None
+                        },
+                        "size_mm": node.short_axis_mm,
+                        "features": [],
                         "radlex_id": None,
                         "radlex_label": "mediastinal lymph node",
-                        "parent_location": "mediastinal_lymph_nodes",
-                        "level": "station",
-                        "laterality": "right" if node.station.endswith("R") else "left" if node.station.endswith("L") else "central",
-                        "position": None
-                    },
-                    "size_mm": node.short_axis_mm,
-                    "features": [],
-                    "radlex_id": None,
-                    "radlex_label": "mediastinal lymph node",
-                    "confidence": 1.0,
-                    "target_lesion": node.short_axis_mm >= 10
-                })
-            for met in case.mets:
-                anatomic_mapping["metastases"].append({
-                    "finding_type": "metastasis",
-                    "anatomic_location": {
-                        "name": met.site,
+                        "confidence": 1.0,
+                        "target_lesion": node.short_axis_mm >= 10
+                    })
+                for met in case.mets:
+                    anatomic_mapping["metastases"].append({
+                        "finding_type": "metastasis",
+                        "anatomic_location": {
+                            "name": met.site,
+                            "radlex_id": None,
+                            "radlex_label": "metastasis",
+                            "parent_location": "extrathoracic",
+                            "level": "organ",
+                            "laterality": None,
+                            "position": None
+                        },
+                        "size_mm": met.size_mm,
+                        "features": [],
                         "radlex_id": None,
                         "radlex_label": "metastasis",
-                        "parent_location": "extrathoracic",
-                        "level": "organ",
-                        "laterality": None,
-                        "position": None
-                    },
-                    "size_mm": met.size_mm,
-                    "features": [],
-                    "radlex_id": None,
-                    "radlex_label": "metastasis",
-                    "confidence": 1.0,
-                    "target_lesion": met.size_mm >= 10
-                })
-            combined_data["anatomic_mapping"] = anatomic_mapping
-        except Exception as e:
-            print(f"Warning: Failed to create anatomic map for {case.meta.accession_number}: {e}")
+                        "confidence": 1.0,
+                        "target_lesion": met.size_mm >= 10
+                    })
+                combined_data["anatomic_mapping"] = anatomic_mapping
+            except Exception as e:
+                print(f"Warning: Failed to create anatomic map for {case.meta.accession_number}: {e}")
+                combined_data["anatomic_mapping"] = {
+                    "body_regions": {},
+                    "lesions": [],
+                    "lymph_nodes": [],
+                    "metastases": [],
+                    "artifacts": []
+                }
+        else:
             combined_data["anatomic_mapping"] = {
                 "body_regions": {},
                 "lesions": [],
@@ -863,18 +993,10 @@ def write_case(case: Case, outdir: str, stem: str, use_radlex: bool = True):
                 "metastases": [],
                 "artifacts": []
             }
-    else:
-        combined_data["anatomic_mapping"] = {
-            "body_regions": {},
-            "lesions": [],
-            "lymph_nodes": [],
-            "metastases": [],
-            "artifacts": []
-        }
 
-    json_path = os.path.join(study_dir, f"{filename}.json")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(combined_data, f, indent=2)
+        json_path = os.path.join(study_dir, f"{filename}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(combined_data, f, indent=2)
 
 def parse_stage_dist(arg: str) -> Dict[str,float]:
     parts = [p for p in arg.split(',') if p]
@@ -899,6 +1021,160 @@ def parse_response_dist(arg: str) -> Dict[str,float]:
     for k in out:
         out[k] /= s
     return out
+
+def ontology_to_jsonl(ontology_dir: str) -> List[dict]:
+    """Convert ontology JSON files to JSONL format similar to RECIST structure"""
+    import json
+    from pathlib import Path
+    
+    jsonl_records = []
+    ontology_path = Path(ontology_dir)
+    
+    for patient_dir in sorted([p for p in ontology_path.iterdir() if p.is_dir()]):
+        patient_id = patient_dir.name
+        
+        # Get all studies for this patient
+        patient_studies = []
+        for study_dir in sorted([p for p in patient_dir.iterdir() if p.is_dir()]):
+            for jf in study_dir.glob("*_ontology.json"):
+                data = json.loads(jf.read_text())
+                patient_studies.append((study_dir.name, data))
+        
+        # Sort studies by visit number
+        patient_studies.sort(key=lambda x: int(x[0].split("_")[1]))
+        
+        # Process each study
+        baseline_sld = None
+        nadir_sld = None
+        
+        for timepoint, (study_dir_name, data) in enumerate(patient_studies):
+            study = data["study"]
+            context = data["context"]
+            nodes = data["nodes"]
+            
+            # Extract study metadata
+            study_id = study["study_id"]
+            study_date = study["study_date"]
+            
+            # Get staging
+            staging = context["staging"]
+            
+            # Process lesions
+            lesions = []
+            current_sld = 0
+            target_lesions = 0
+            nontarget_lesions = 0
+            
+            for node in nodes:
+                if node.get("type") == "lesion":
+                    category = node.get("category")
+                    lesion_uid = node.get("lesion_uid", "")
+                    
+                    # Get measurements
+                    measurements = node.get("measurements", [])
+                    size_mm = measurements[0].get("value_mm", 0) if measurements else 0
+                    
+                    # Get anatomy info
+                    anatomy = node.get("anatomy", {})
+                    anatomy_text = anatomy.get("text", "")
+                    
+                    # Determine lesion type and organ
+                    if category == "primary_tumor":
+                        organ = "lung"
+                        location = anatomy_text
+                        rule = "longest"
+                        kind = "primary"
+                    elif category == "lymph_node":
+                        organ = "lymph_node"
+                        location = anatomy_text
+                        rule = "short_axis"
+                        kind = "node"
+                    elif category == "metastasis":
+                        organ = anatomy_text.split()[0] if anatomy_text else "unknown"
+                        location = anatomy_text
+                        rule = "longest"
+                        kind = "metastasis"
+                    else:
+                        continue
+                    
+                    # Determine if target lesion
+                    is_target = node.get("target_status") == "target"
+                    if is_target:
+                        target_lesions += 1
+                        current_sld += size_mm
+                    else:
+                        nontarget_lesions += 1
+                    
+                    lesion_data = {
+                        "lesion_id": lesion_uid,
+                        "kind": kind,
+                        "organ": organ,
+                        "location": location,
+                        "rule": rule,
+                        "size_mm_current": size_mm,
+                        "baseline_mm": size_mm if timepoint == 0 else None,
+                        "follow_mm": size_mm if timepoint > 0 else None,
+                        "margin": "smooth",  # Default
+                        "necrosis": False,   # Default
+                        "suspicious": True,  # Default
+                        "target": is_target
+                    }
+                    
+                    # Add non-target reason if applicable
+                    if not is_target:
+                        if size_mm < 10:
+                            lesion_data["reason"] = "too_small"
+                        else:
+                            lesion_data["reason"] = "non-target (exceeds per-organ/total cap)"
+                    
+                    lesions.append(lesion_data)
+            
+            # Set baseline SLD
+            if timepoint == 0:
+                baseline_sld = current_sld
+                nadir_sld = current_sld
+            else:
+                # Update nadir
+                if current_sld < nadir_sld:
+                    nadir_sld = current_sld
+            
+            # Determine overall response (simplified)
+            if timepoint == 0:
+                overall_response = "Baseline"
+            else:
+                if current_sld == 0:
+                    overall_response = "Complete response"
+                elif current_sld <= 0.70 * baseline_sld:
+                    overall_response = "Partial response"
+                elif current_sld >= 1.20 * nadir_sld and (current_sld - nadir_sld) >= 5:
+                    overall_response = "Progressive disease"
+                else:
+                    overall_response = "Stable disease"
+            
+            # Create JSONL record
+            record = {
+                "patient_id": patient_id,
+                "timepoint": timepoint,
+                "study_date": study_date,
+                "baseline_sld_mm": baseline_sld if timepoint == 0 else None,
+                "current_sld_mm": current_sld if timepoint > 0 or timepoint == 0 else None,
+                "nadir_sld_mm": nadir_sld,
+                "target_lesions": target_lesions,
+                "nontarget_lesions": nontarget_lesions,
+                "overall_response": overall_response,
+                "report_text": study["report_sections"]["findings"],
+                "lesions": lesions,
+                "staging": {
+                    "T": staging["T"],
+                    "N": staging["N"],
+                    "M": staging["M"],
+                    "stage_group": staging["stage_group"]
+                }
+            }
+            
+            jsonl_records.append(record)
+    
+    return jsonl_records
 
 def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime] = None) -> List[dict]:
     """
@@ -1142,6 +1418,9 @@ def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime]
             nontarget_ct = sum(1 for l in lesions_current if (not l.get("target")) and int(l.get("size_mm_current") or 0) > 0)
 
             # 6) package record
+            # Generate report text for this case
+            report_text = generate_report(case)
+            
             rec = {
                 "patient_id": pid,
                 "timepoint": tp,
@@ -1152,6 +1431,7 @@ def case_to_recist_jsonl(cases: List[Case], study_dates: List[datetime.datetime]
                 "target_lesions": target_ct,
                 "nontarget_lesions": nontarget_ct,
                 "overall_response": overall,
+                "report_text": report_text,
                 "lesions": []
             }
 
@@ -1199,6 +1479,7 @@ def main():
     ap.add_argument("--no-radlex", action="store_true", help="Disable RadLex anatomic mapping (enabled by default)")
     ap.add_argument("--legacy-mode", action="store_true", help="Use legacy flat file structure")
     ap.add_argument("--jsonl", type=str, default=None, help="Output JSONL file for React app (e.g., cohort_labels.jsonl)")
+    ap.add_argument("--ontology-only", action="store_true", help="Generate only ontology JSON files (skip traditional .txt and .json files)")
     args = ap.parse_args()
 
     if args.studies_per_patient < 2 or args.studies_per_patient > 10:
@@ -1209,6 +1490,15 @@ def main():
     dist = parse_stage_dist(args.stage_dist)
     response_dist = parse_response_dist(args.response_dist)
     use_radlex = not args.no_radlex
+
+    # Initialize ontology config generator if RadLex is enabled
+    ontology_generator = None
+    if use_radlex:
+        try:
+            from .ontology_config_generator import OntologyConfigGenerator
+            ontology_generator = OntologyConfigGenerator(use_radlex=True)
+        except Exception as e:
+            print(f"Warning: Failed to initialize ontology generator: {e}")
 
     all_cases = []
     all_study_dates = []
@@ -1224,7 +1514,7 @@ def main():
                 patient_id=patient_id,
                 visit_number=1
             )
-            write_case(baseline_case, args.out, f"{patient_id}_baseline", use_radlex)
+            write_case(baseline_case, args.out, f"{patient_id}_baseline", use_radlex, ontology_generator, datetime.datetime.now(), args.ontology_only)
 
             if args.follow_up:
                 follow_up_case = generate_follow_up_case(
@@ -1232,7 +1522,7 @@ def main():
                     seed=rng.randint(0,10_000_000),
                     days_later=args.follow_up_days
                 )
-                write_case(follow_up_case, args.out, f"{patient_id}_followup", use_radlex)
+                write_case(follow_up_case, args.out, f"{patient_id}_followup", use_radlex, ontology_generator, datetime.datetime.now(), args.ontology_only)
         else:
             cases, study_dates = generate_patient_timeline(
                 patient_id=patient_id,
@@ -1242,18 +1532,47 @@ def main():
                 max_studies=args.studies_per_patient,
                 response_dist=response_dist
             )
-            for case in cases:
-                write_case(case, args.out, case.meta.accession_number, use_radlex)
+            for i, case in enumerate(cases):
+                study_date = study_dates[i] if i < len(study_dates) else datetime.datetime.now()
+                write_case(case, args.out, case.meta.accession_number, use_radlex, ontology_generator, study_date, args.ontology_only)
             all_cases.extend(cases)
             all_study_dates.extend(study_dates)
 
-    if args.jsonl and all_cases:
-        jsonl_data = case_to_recist_jsonl(all_cases, all_study_dates)
-        jsonl_path = os.path.join(args.out, args.jsonl)
-        with open(jsonl_path, "w", encoding="utf-8") as f:
-            for entry in jsonl_data:
-                f.write(json.dumps(entry) + "\n")
-        print(f"Created JSONL file: {jsonl_path}")
+    # Generate JSONL file
+    if args.jsonl:
+        if args.ontology_only and ontology_generator:
+            # Generate JSONL from ontology files
+            try:
+                jsonl_data = ontology_to_jsonl(args.out)
+                jsonl_path = os.path.join(args.out, args.jsonl)
+                with open(jsonl_path, "w", encoding="utf-8") as f:
+                    for entry in jsonl_data:
+                        f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+                print(f"Created ontology-based JSONL file: {jsonl_path}")
+                print(f"Total records: {len(jsonl_data)}")
+            except Exception as e:
+                print(f"Warning: Failed to generate ontology-based JSONL: {e}")
+        elif all_cases:
+            # Generate JSONL from traditional case data
+            jsonl_data = case_to_recist_jsonl(all_cases, all_study_dates)
+            jsonl_path = os.path.join(args.out, args.jsonl)
+            with open(jsonl_path, "w", encoding="utf-8") as f:
+                for entry in jsonl_data:
+                    f.write(json.dumps(entry) + "\n")
+            print(f"Created traditional JSONL file: {jsonl_path}")
+    
+    # Auto-generate JSONL if ontology files were created and no explicit JSONL was requested
+    elif args.ontology_only and ontology_generator:
+        try:
+            jsonl_data = ontology_to_jsonl(args.out)
+            jsonl_path = os.path.join(args.out, "cohort_labels_ontology.jsonl")
+            with open(jsonl_path, "w", encoding="utf-8") as f:
+                for entry in jsonl_data:
+                    f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+            print(f"Auto-generated ontology-based JSONL file: {jsonl_path}")
+            print(f"Total records: {len(jsonl_data)}")
+        except Exception as e:
+            print(f"Warning: Failed to auto-generate ontology-based JSONL: {e}")
 
 if __name__ == "__main__":
     main()
